@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Detektor Pohybu s Kompenzací Kamery</title>
+  <title>Detektor Samostatného Pohybu</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -19,12 +19,14 @@
     h1 { font-size: 1.2rem; margin-bottom: 6px; color: #38bdf8; text-align: center; }
     .status {
       background: #1e293b;
-      padding: 8px 14px;
-      border-radius: 20px;
+      padding: 10px 14px;
+      border-radius: 12px;
       font-size: 0.85rem;
       margin-bottom: 12px;
       border: 1px solid #334155;
       text-align: center;
+      width: 100%;
+      max-width: 480px;
     }
     .container {
       position: relative;
@@ -68,13 +70,11 @@
     .row { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.85rem; }
     input[type=range] { width: 50%; }
   </style>
-  <!-- Načtení OpenCV.js přes spolehlivou CDN -->
-  <script async src="https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0-release.1/opencv.js" onload="onOpenCvReady();" onerror="onOpenCvError();"></script>
 </head>
 <body>
 
   <h1>Detekce Samostatného Pohybu</h1>
-  <div id="status" class="status">⏳ Načítám algoritmus OpenCV.js...</div>
+  <div id="status" class="status">⏳ Načítám algoritmus OpenCV...</div>
 
   <div class="container">
     <video id="video" playsinline muted autoplay></video>
@@ -94,7 +94,6 @@
   </div>
 
   <script>
-    let cvReady = false;
     const statusEl = document.getElementById('status');
     const startBtn = document.getElementById('startBtn');
     const video = document.getElementById('video');
@@ -105,23 +104,64 @@
 
     let isRunning = false;
     let stream = null;
-
     let prevGray = null;
     let prevPoints = null;
     const procW = 320;
     const procH = 240;
 
-    function onOpenCvReady() {
-      cvReady = true;
-      statusEl.innerText = "✅ Algoritmus připraven. Stiskněte Spustit.";
-      statusEl.style.color = "#4ade80";
-      startBtn.disabled = false;
+    // Seznam záložních serverů pro načtení OpenCV.js
+    const cdns = [
+      'https://docs.opencv.org/4.10.0/opencv.js',
+      'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0-release.1/opencv.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/opencv/4.8.0/opencv.js'
+    ];
+    let currentCdnIndex = 0;
+
+    // Příprava globálního objektu Module pro OpenCV.js
+    window.Module = {
+      onRuntimeInitialized: function() {
+        statusEl.innerText = "✅ Algoritmus připraven. Stiskněte Spustit.";
+        statusEl.style.color = "#4ade80";
+        startBtn.disabled = false;
+      }
+    };
+
+    function loadOpenCV() {
+      if (currentCdnIndex >= cdns.length) {
+        statusEl.innerText = "❌ Nepodařilo se načíst OpenCV ze žádného serveru. Zkontrolujte připojení k internetu.";
+        statusEl.style.color = "#f87171";
+        return;
+      }
+
+      const currentUrl = cdns[currentCdnIndex];
+      statusEl.innerText = `⏳ Načítám algoritmus (pokus ${currentCdnIndex + 1}/${cdns.length})...`;
+
+      const script = document.createElement('script');
+      script.src = currentUrl;
+      script.async = true;
+
+      // Timeout 12 sekund na jeden server
+      const timeout = setTimeout(() => {
+        script.onerror();
+      }, 12000);
+
+      script.onload = () => {
+        clearTimeout(timeout);
+      };
+
+      script.onerror = () => {
+        clearTimeout(timeout);
+        console.warn(`Selhalo načtení z: ${currentUrl}`);
+        currentCdnIndex++;
+        script.remove();
+        loadOpenCV();
+      };
+
+      document.body.appendChild(script);
     }
 
-    function onOpenCvError() {
-      statusEl.innerText = "❌ Nepodařilo se načíst OpenCV.js. Zkontrolujte připojení.";
-      statusEl.style.color = "#f87171";
-    }
+    // Spuštění načítání
+    loadOpenCV();
 
     startBtn.addEventListener('click', async () => {
       if (!isRunning) {
@@ -172,7 +212,6 @@
     function processLoop() {
       if (!isRunning) return;
 
-      // Zmenšení snímku pro rychlé zpracování na mobilu
       const procCanvas = document.createElement('canvas');
       procCanvas.width = procW;
       procCanvas.height = procH;
@@ -186,7 +225,6 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (!prevGray) {
-        // První snímek - nalezení bodů pozadí
         prevGray = currGray.clone();
         prevPoints = new cv.Mat();
         cv.goodFeaturesToTrack(prevGray, prevPoints, 80, 0.01, 10);
@@ -195,7 +233,6 @@
         return;
       }
 
-      // Sledování bodů pozadí (Optical Flow)
       let currPoints = new cv.Mat();
       let statusMat = new cv.Mat();
       let errMat = new cv.Mat();
@@ -217,15 +254,12 @@
           let matP1 = cv.matFromArray(p1.length / 2, 1, cv.CV_32FC2, p1);
           let matP2 = cv.matFromArray(p2.length / 2, 1, cv.CV_32FC2, p2);
 
-          // Výpočet transformace pohybu telefonu
           let H = cv.findHomography(matP1, matP2, cv.RANSAC, 3.0);
 
           if (!H.empty()) {
-            // Geometrické zarovnání minulého snímku na nové pozadí
             let warpedPrev = new cv.Mat();
             cv.warpPerspective(prevGray, warpedPrev, H, new cv.Size(procW, procH));
 
-            // Odečtení zarovnaných snímků
             let diff = new cv.Mat();
             cv.absdiff(currGray, warpedPrev, diff);
 
@@ -237,7 +271,6 @@
             let dilated = new cv.Mat();
             cv.dilate(thresh, dilated, M);
 
-            // Vyhledání samostatně se pohybujících objektů
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
             cv.findContours(dilated, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
@@ -247,7 +280,7 @@
 
             for (let i = 0; i < contours.size(); ++i) {
               let contour = contours.get(i);
-              if (cv.contourArea(contour) > 120) { // Ignorovat drobný šum
+              if (cv.contourArea(contour) > 120) {
                 let rect = cv.boundingRect(contour);
                 ctx.strokeStyle = "#00ff66";
                 ctx.lineWidth = 3;
@@ -264,7 +297,6 @@
           matP1.delete(); matP2.delete();
         }
 
-        // Vykreslení modrých bodů pozadí (Debug režim)
         if (debugCheck.checked) {
           const scaleX = canvas.width / procW;
           const scaleY = canvas.height / procH;
@@ -279,7 +311,6 @@
         }
       }
 
-      // Příprava na další snímek
       prevGray.delete();
       prevGray = currGray.clone();
 
