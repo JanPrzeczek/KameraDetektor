@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Detektor Samostatného Pohybu</title>
+  <title>Detektor Samostatného Pohybu (OpenCV)</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -73,8 +73,8 @@
 </head>
 <body>
 
-  <h1>Detekce Samostatného Pohybu</h1>
-  <div id="status" class="status">⏳ Načítám algoritmus OpenCV...</div>
+  <h1>Detekce Pohybu s Kompenzací Rotace</h1>
+  <div id="status" class="status">⏳ Inicializuji OpenCV engine...</div>
 
   <div class="container">
     <video id="video" playsinline muted autoplay></video>
@@ -109,59 +109,24 @@
     const procW = 320;
     const procH = 240;
 
-    // Seznam záložních serverů pro načtení OpenCV.js
-    const cdns = [
-      'https://docs.opencv.org/4.10.0/opencv.js',
-      'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0-release.1/opencv.js',
-      'https://cdnjs.cloudflare.com/ajax/libs/opencv/4.8.0/opencv.js'
-    ];
-    let currentCdnIndex = 0;
-
-    // Příprava globálního objektu Module pro OpenCV.js
+    // Příprava WebAssembly modulu před načtením skriptu
     window.Module = {
       onRuntimeInitialized: function() {
-        statusEl.innerText = "✅ Algoritmus připraven. Stiskněte Spustit.";
+        statusEl.innerText = "✅ OpenCV (WASM) připraveno!";
         statusEl.style.color = "#4ade80";
         startBtn.disabled = false;
       }
     };
 
-    function loadOpenCV() {
-      if (currentCdnIndex >= cdns.length) {
-        statusEl.innerText = "❌ Nepodařilo se načíst OpenCV ze žádného serveru. Zkontrolujte připojení k internetu.";
-        statusEl.style.color = "#f87171";
-        return;
-      }
-
-      const currentUrl = cdns[currentCdnIndex];
-      statusEl.innerText = `⏳ Načítám algoritmus (pokus ${currentCdnIndex + 1}/${cdns.length})...`;
-
-      const script = document.createElement('script');
-      script.src = currentUrl;
-      script.async = true;
-
-      // Timeout 12 sekund na jeden server
-      const timeout = setTimeout(() => {
-        script.onerror();
-      }, 12000);
-
-      script.onload = () => {
-        clearTimeout(timeout);
-      };
-
-      script.onerror = () => {
-        clearTimeout(timeout);
-        console.warn(`Selhalo načtení z: ${currentUrl}`);
-        currentCdnIndex++;
-        script.remove();
-        loadOpenCV();
-      };
-
-      document.body.appendChild(script);
-    }
-
-    // Spuštění načítání
-    loadOpenCV();
+    // Přímé načtení oficiální sestavené knihovny OpenCV
+    const script = document.createElement('script');
+    script.src = "https://docs.opencv.org/4.10.0/opencv.js";
+    script.async = true;
+    script.onerror = () => {
+      statusEl.innerText = "❌ Síť zablokovala stahování OpenCV. Vypněte Blokování reklam / VPN v telefonu a obnovte stránku.";
+      statusEl.style.color = "#f87171";
+    };
+    document.body.appendChild(script);
 
     startBtn.addEventListener('click', async () => {
       if (!isRunning) {
@@ -173,7 +138,7 @@
 
     async function startCamera() {
       try {
-        statusEl.innerText = "🎥 Otevírám kameru...";
+        statusEl.innerText = "🎥 Spouštím kameru...";
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false
@@ -187,7 +152,7 @@
         isRunning = true;
         startBtn.innerText = "Zastavit Detekci";
         startBtn.style.background = "#dc2626";
-        statusEl.innerText = "🟢 Detekce aktivní (Kompenzuji pohyb kamery)";
+        statusEl.innerText = "🟢 Kompenzace rotace a pohybu aktivní";
 
         requestAnimationFrame(processLoop);
       } catch (err) {
@@ -205,7 +170,7 @@
       if (prevPoints) { prevPoints.delete(); prevPoints = null; }
       startBtn.innerText = "Spustit Detekci";
       startBtn.style.background = "#0284c7";
-      statusEl.innerText = "⏹️ Zastaveno";
+      statusEl.innerText = "⚡ Připraveno";
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
@@ -227,7 +192,7 @@
       if (!prevGray) {
         prevGray = currGray.clone();
         prevPoints = new cv.Mat();
-        cv.goodFeaturesToTrack(prevGray, prevPoints, 80, 0.01, 10);
+        cv.goodFeaturesToTrack(prevGray, prevPoints, 70, 0.01, 10);
         src.delete(); currGray.delete();
         requestAnimationFrame(processLoop);
         return;
@@ -239,7 +204,7 @@
       let winSize = new cv.Size(15, 15);
       let criteria = new cv.TermCriteria(cv.TermCriteria_COUNT + cv.TermCriteria_EPS, 10, 0.03);
 
-      if (prevPoints.rows > 10) {
+      if (prevPoints.rows > 8) {
         cv.calcOpticalFlowPyrLK(prevGray, currGray, prevPoints, currPoints, statusMat, errMat, winSize, 2, criteria);
 
         let p1 = [], p2 = [];
@@ -250,10 +215,11 @@
           }
         }
 
-        if (p1.length >= 12) {
+        if (p1.length >= 8) {
           let matP1 = cv.matFromArray(p1.length / 2, 1, cv.CV_32FC2, p1);
           let matP2 = cv.matFromArray(p2.length / 2, 1, cv.CV_32FC2, p2);
 
+          // RANSAC Homografie: Odfiltruje pohyb samotného telefonu včetně rotace a náklonu
           let H = cv.findHomography(matP1, matP2, cv.RANSAC, 3.0);
 
           if (!H.empty()) {
@@ -267,7 +233,7 @@
             let thresh = new cv.Mat();
             cv.threshold(diff, thresh, threshVal, 255, cv.THRESH_BINARY);
 
-            let M = cv.Mat.ones(5, 5, cv.CV_8U);
+            let M = cv.Mat.ones(3, 3, cv.CV_8U);
             let dilated = new cv.Mat();
             cv.dilate(thresh, dilated, M);
 
@@ -280,7 +246,7 @@
 
             for (let i = 0; i < contours.size(); ++i) {
               let contour = contours.get(i);
-              if (cv.contourArea(contour) > 120) {
+              if (cv.contourArea(contour) > 100) {
                 let rect = cv.boundingRect(contour);
                 ctx.strokeStyle = "#00ff66";
                 ctx.lineWidth = 3;
@@ -288,7 +254,7 @@
 
                 ctx.fillStyle = "#00ff66";
                 ctx.font = "bold 14px sans-serif";
-                ctx.fillText("Objekt v pohybu", rect.x * scaleX, Math.max(15, rect.y * scaleY - 6));
+                ctx.fillText("Samostatný pohyb", rect.x * scaleX, Math.max(16, rect.y * scaleY - 6));
               }
             }
 
@@ -314,10 +280,10 @@
       prevGray.delete();
       prevGray = currGray.clone();
 
-      if (prevPoints.rows < 25) {
+      if (prevPoints.rows < 20) {
         prevPoints.delete();
         prevPoints = new cv.Mat();
-        cv.goodFeaturesToTrack(prevGray, prevPoints, 80, 0.01, 10);
+        cv.goodFeaturesToTrack(prevGray, prevPoints, 70, 0.01, 10);
       } else {
         prevPoints.delete();
         prevPoints = currPoints.clone();
