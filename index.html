@@ -1,0 +1,876 @@
+```html
+<!DOCTYPE html>
+<html lang="cs" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Smart Motion Detector - Camera Motion Compensation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    body {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+    }
+    .radar-grid {
+      background-size: 10px 10px;
+      background-image: 
+        linear-gradient(to right, rgba(16, 185, 129, 0.08) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(16, 185, 129, 0.08) 1px, transparent 1px);
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col font-sans select-none overflow-hidden bg-slate-950">
+
+  <!-- Top Navigation Header -->
+  <header class="bg-slate-900/90 border-b border-slate-800 px-4 py-3 flex items-center justify-between shrink-0 z-20 backdrop-blur">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-inner">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-sm font-bold tracking-wide text-white leading-none">Smart Motion Detector</h1>
+        <p class="text-[11px] text-emerald-400 font-medium mt-0.5">Kompenzace pohybu kamery</p>
+      </div>
+    </div>
+
+    <!-- Motion Status Badge -->
+    <div id="statusBadge" class="px-3 py-1 rounded-full border text-xs font-semibold flex items-center gap-1.5 transition-all bg-slate-800 border-slate-700 text-slate-400">
+      <span class="w-2 h-2 rounded-full bg-slate-500" id="statusDot"></span>
+      <span id="statusText">Pravidelný provoz</span>
+    </div>
+  </header>
+
+  <!-- Video and Main Render Canvas -->
+  <main class="relative flex-1 bg-black overflow-hidden flex items-center justify-center">
+    
+    <!-- Hidden HTML5 Video Source -->
+    <video id="video" playsinline autoplay muted class="hidden"></video>
+
+    <!-- Main Render Canvas -->
+    <canvas id="displayCanvas" class="w-full h-full object-contain"></canvas>
+
+    <!-- Offscreen Downsampled Canvas for Motion Analysis -->
+    <canvas id="procCanvas" class="hidden" width="160" height="120"></canvas>
+
+    <!-- Visual Motion Radar Overlay (HUD Stats) -->
+    <div class="absolute top-3 left-3 bg-slate-900/85 border border-slate-700/60 backdrop-blur rounded-xl p-3 text-xs text-slate-200 flex flex-col gap-2 shadow-xl pointer-events-none z-10 min-w-[150px] radar-grid">
+      
+      <div class="flex justify-between items-center gap-3">
+        <span class="text-slate-400">Snímky:</span>
+        <span id="fpsMeter" class="font-mono font-bold text-emerald-400">0 FPS</span>
+      </div>
+
+      <!-- Camera Vector Motion Indicator -->
+      <div class="flex justify-between items-center gap-2 pt-1 border-t border-slate-800">
+        <span class="text-slate-400">Pohyb Kamery:</span>
+        <span id="camVectorVal" class="font-mono font-bold text-sky-400">X: 0, Y: 0</span>
+      </div>
+
+      <!-- Camera Vector Motion Mini Arrow/Dot Radar -->
+      <div class="flex items-center justify-between bg-slate-950/80 p-2 rounded-lg border border-slate-800/80">
+        <span class="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Stabilizace</span>
+        <div class="relative w-6 h-6 rounded-full border border-slate-700 bg-slate-900 flex items-center justify-center">
+          <div id="vectorDot" class="w-2 h-2 rounded-full bg-sky-400 transition-all duration-75 transform translate-x-0 translate-y-0"></div>
+        </div>
+      </div>
+
+      <div class="flex justify-between items-center gap-3 pt-1 border-t border-slate-800">
+        <span class="text-slate-400">Aktivita:</span>
+        <span id="motionMeterVal" class="font-mono font-bold text-amber-400">0%</span>
+      </div>
+      
+      <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+        <div id="motionBar" class="bg-emerald-500 h-full w-0 transition-all duration-100"></div>
+      </div>
+
+      <div class="flex justify-between items-center gap-3">
+        <span class="text-slate-400">Objekty:</span>
+        <span id="boxCount" class="font-mono font-bold text-emerald-400">0</span>
+      </div>
+    </div>
+
+    <!-- Motion Alert Visual Flash Frame -->
+    <div id="motionFlash" class="absolute inset-0 border-4 border-emerald-500/0 pointer-events-none transition-all duration-150 z-10"></div>
+
+    <!-- Start Overlay Screen -->
+    <div id="startPrompt" class="absolute inset-0 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20">
+      <div class="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-4 shadow-2xl">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      </div>
+      <h2 class="text-xl font-bold text-white mb-2">Detekce Nezávislého Pohybu</h2>
+      <p class="text-xs text-slate-400 max-w-xs mb-6 leading-relaxed">
+        Aplikace využívá **odhad posunu pozadí (Global Motion Estimation)**. S telefonem můžete volně pohybovat v ruce – algoritmus odfiltruje pohyb kamery a označí zeleně pouze reálně se pohybující objekty.
+      </p>
+      <button id="btnStart" class="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-emerald-500/20 transition flex items-center gap-2 text-sm">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+        </svg>
+        Spustit Stabilizovanou Detekci
+      </button>
+    </div>
+
+    <!-- Error Alert Overlay -->
+    <div id="errorModal" class="hidden absolute inset-0 bg-slate-950/95 p-6 flex flex-col items-center justify-center text-center z-30">
+      <div class="w-12 h-12 rounded-full bg-rose-500/20 text-rose-500 flex items-center justify-center mb-3">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      </div>
+      <h3 class="text-lg font-bold text-white mb-1" id="errorTitle">Chyba Kamery</h3>
+      <p class="text-xs text-slate-400 max-w-xs mb-4 leading-relaxed" id="errorMessage">Nedaří se získat přístup k vaší kameře.</p>
+      <button id="btnRetry" class="bg-slate-800 hover:bg-slate-700 text-white font-semibold px-4 py-2 rounded-lg text-xs border border-slate-700">
+        Zkusit Znovu
+      </button>
+    </div>
+  </main>
+
+  <!-- Bottom Control Panel -->
+  <footer class="bg-slate-900 border-t border-slate-800 p-4 shrink-0 z-20 max-h-[50vh] overflow-y-auto custom-scrollbar">
+    <div class="max-w-md mx-auto space-y-4">
+
+      <!-- Action Buttons Row -->
+      <div class="grid grid-cols-4 gap-2">
+        <button id="btnTogglePlay" disabled class="col-span-2 bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white font-semibold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 text-xs transition active:scale-95 shadow">
+          <svg id="playIcon" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+          </svg>
+          <svg id="stopIcon" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+          </svg>
+          <span id="btnPlayText">Zastavit</span>
+        </button>
+
+        <button id="btnFlipCamera" disabled class="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-medium py-2.5 px-2 rounded-xl border border-slate-700 flex items-center justify-center gap-1 text-xs transition active:scale-95">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Otočit
+        </button>
+
+        <button id="btnSnapshot" disabled class="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-medium py-2.5 px-2 rounded-xl border border-slate-700 flex items-center justify-center gap-1 text-xs transition active:scale-95">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h0.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          Snímek
+        </button>
+      </div>
+
+      <!-- Settings Controls Grid -->
+      <div class="bg-slate-950/70 p-3 rounded-xl border border-slate-800 space-y-3">
+        
+        <!-- Threshold Slider -->
+        <div>
+          <div class="flex justify-between items-center mb-1">
+            <label for="threshSlider" class="text-xs font-semibold text-slate-300">Citlivost Rozdílu Pixelů</label>
+            <span id="threshVal" class="text-xs font-mono font-bold text-emerald-400">22</span>
+          </div>
+          <input id="threshSlider" type="range" min="10" max="60" value="22" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
+        </div>
+
+        <!-- Search Range Slider -->
+        <div>
+          <div class="flex justify-between items-center mb-1">
+            <label for="searchRangeSlider" class="text-xs font-semibold text-slate-300">Rozsah Hledání Pohybu Kamery</label>
+            <span id="searchRangeVal" class="text-xs font-mono font-bold text-sky-400">±10 px</span>
+          </div>
+          <input id="searchRangeSlider" type="range" min="4" max="18" value="10" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500">
+        </div>
+
+        <!-- Min Area / Size Slider -->
+        <div>
+          <div class="flex justify-between items-center mb-1">
+            <label for="areaSlider" class="text-xs font-semibold text-slate-300">Minimální Velikost Objektu</label>
+            <span id="areaVal" class="text-xs font-mono font-bold text-emerald-400">3 buňky</span>
+          </div>
+          <input id="areaSlider" type="range" min="1" max="15" value="3" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
+        </div>
+
+        <!-- Toggles Grid -->
+        <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-[11px]">
+          <!-- Debug Mask Toggle -->
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" id="chkDebug" class="sr-only peer">
+            <div class="w-7 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-500 relative"></div>
+            <span class="text-slate-300">Debug Maska</span>
+          </label>
+
+          <!-- Draw Motion Vectors Toggle -->
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" id="chkVectors" checked class="sr-only peer">
+            <div class="w-7 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-sky-500 relative"></div>
+            <span class="text-slate-300">Vektory</span>
+          </label>
+
+          <!-- Audio Alert Toggle -->
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" id="chkAudio" class="sr-only peer">
+            <div class="w-7 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-500 relative"></div>
+            <span class="text-slate-300">Zvuk</span>
+          </label>
+        </div>
+
+      </div>
+
+    </div>
+  </footer>
+
+  <script>
+    // DOM Elements
+    const video = document.getElementById('video');
+    const displayCanvas = document.getElementById('displayCanvas');
+    const displayCtx = displayCanvas.getContext('2d');
+    const procCanvas = document.getElementById('procCanvas');
+    const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
+
+    // UI Buttons
+    const btnStart = document.getElementById('btnStart');
+    const btnTogglePlay = document.getElementById('btnTogglePlay');
+    const btnFlipCamera = document.getElementById('btnFlipCamera');
+    const btnSnapshot = document.getElementById('btnSnapshot');
+    const startPrompt = document.getElementById('startPrompt');
+    const btnPlayText = document.getElementById('btnPlayText');
+    const playIcon = document.getElementById('playIcon');
+    const stopIcon = document.getElementById('stopIcon');
+
+    // Stats & Feedback
+    const statusBadge = document.getElementById('statusBadge');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const fpsMeter = document.getElementById('fpsMeter');
+    const camVectorVal = document.getElementById('camVectorVal');
+    const vectorDot = document.getElementById('vectorDot');
+    const motionMeterVal = document.getElementById('motionMeterVal');
+    const motionBar = document.getElementById('motionBar');
+    const boxCountEl = document.getElementById('boxCount');
+    const motionFlash = document.getElementById('motionFlash');
+
+    // Controls & Sliders
+    const threshSlider = document.getElementById('threshSlider');
+    const threshVal = document.getElementById('threshVal');
+    const searchRangeSlider = document.getElementById('searchRangeSlider');
+    const searchRangeVal = document.getElementById('searchRangeVal');
+    const areaSlider = document.getElementById('areaSlider');
+    const areaVal = document.getElementById('areaVal');
+    const chkDebug = document.getElementById('chkDebug');
+    const chkVectors = document.getElementById('chkVectors');
+    const chkAudio = document.getElementById('chkAudio');
+
+    // Modal Error
+    const errorModal = document.getElementById('errorModal');
+    const errorTitle = document.getElementById('errorTitle');
+    const errorMessage = document.getElementById('errorMessage');
+    const btnRetry = document.getElementById('btnRetry');
+
+    // Application State
+    let currentStream = null;
+    let isStreaming = false;
+    let currentFacingMode = 'environment';
+    let animationFrameId = null;
+
+    // Processing Dimensions (Downsampled for maximum mobile CPU performance)
+    const PROC_WIDTH = 160;
+    const PROC_HEIGHT = 120;
+    
+    // Clustering Grid (16x12 cells -> each cell is 10x10 px)
+    const GRID_COLS = 16;
+    const GRID_ROWS = 12;
+    const CELL_W = PROC_WIDTH / GRID_COLS;
+    const CELL_H = PROC_HEIGHT / GRID_ROWS;
+
+    // Control parameters
+    let pixelThreshold = parseInt(threshSlider.value, 10);
+    let searchRange = parseInt(searchRangeSlider.value, 10);
+    let minBlobCells = parseInt(areaSlider.value, 10);
+    let showDebug = chkDebug.checked;
+    let showVectors = chkVectors.checked;
+    let playAudioAlert = chkAudio.checked;
+
+    // Buffers & Web Audio
+    let prevGrayscale = null;
+    let audioCtx = null;
+    let lastBeepTime = 0;
+
+    // FPS Meter
+    let lastFpsTime = performance.now();
+    let frameCount = 0;
+
+    // Helper function to calculate median of array values
+    function getMedian(arr) {
+      if (!arr || arr.length === 0) return 0;
+      const sorted = [...arr].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      if (sorted.length % 2 === 0) {
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+      }
+      return sorted[mid];
+    }
+
+    function triggerAudioBeep() {
+      if (!playAudioAlert) return;
+      const now = Date.now();
+      if (now - lastBeepTime < 350) return;
+      lastBeepTime = now;
+
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(784, audioCtx.currentTime); // G5 note
+        osc.frequency.exponentialRampToValueAtTime(523, audioCtx.currentTime + 0.12); // C5
+
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.12);
+      } catch (e) {
+        console.warn('Audio play error:', e);
+      }
+    }
+
+    async function initCamera() {
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        showError('Vyžadováno HTTPS', 'Prohlížeče omezují přístup k fotoaparátu na nezabezpečených HTTP připojeních. Spusťte na HTTPS.');
+        return;
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showError('Nepodporovaný Prohlížeč', 'Váš prohlížeč neobsahuje rozhraní pro přístup k webové kameře.');
+        return;
+      }
+
+      stopCameraStream();
+
+      try {
+        const constraints = {
+          video: {
+            facingMode: currentFacingMode,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false
+        };
+
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = currentStream;
+
+        await new Promise((resolve) => {
+          video.onloadedmetadata = () => {
+            video.play();
+            resolve();
+          };
+        });
+
+        isStreaming = true;
+        startPrompt.classList.add('hidden');
+        errorModal.classList.add('hidden');
+
+        btnTogglePlay.disabled = false;
+        btnFlipCamera.disabled = false;
+        btnSnapshot.disabled = false;
+        updatePlayBtnUI(true);
+
+        resizeDisplayCanvas();
+
+        prevGrayscale = null;
+        lastFpsTime = performance.now();
+        frameCount = 0;
+        processLoop();
+
+      } catch (err) {
+        console.error('Camera Init Error:', err);
+        let msg = 'Nepodařilo se získat přístup k fotoaparátu.';
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          msg = 'Přístup k fotoaparátu byl zamítnut. Povolte prosím oprávnění v nastavení prohlížeče.';
+        } else if (err.name === 'NotFoundError') {
+          msg = 'Na tomto zařízení nebyla nalezena žádná vhodná kamera.';
+        }
+        showError('Chyba Kamery', msg);
+      }
+    }
+
+    function stopCameraStream() {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
+      }
+      isStreaming = false;
+      updatePlayBtnUI(false);
+      updateStatusBadge(false, false);
+    }
+
+    function resizeDisplayCanvas() {
+      if (!video.videoWidth) return;
+      displayCanvas.width = video.videoWidth;
+      displayCanvas.height = video.videoHeight;
+    }
+
+    function processLoop() {
+      if (!isStreaming) return;
+
+      // Compute FPS
+      const now = performance.now();
+      frameCount++;
+      if (now - lastFpsTime >= 1000) {
+        fpsMeter.textContent = `${Math.round((frameCount * 1000) / (now - lastFpsTime))} FPS`;
+        frameCount = 0;
+        lastFpsTime = now;
+      }
+
+      // Render video to low-res process canvas
+      procCtx.drawImage(video, 0, 0, PROC_WIDTH, PROC_HEIGHT);
+      const currFrame = procCtx.getImageData(0, 0, PROC_WIDTH, PROC_HEIGHT);
+      const currData = currFrame.data;
+
+      // Convert current frame to Grayscale Uint8Array
+      const totalPixels = PROC_WIDTH * PROC_HEIGHT;
+      const currGray = new Uint8Array(totalPixels);
+      for (let i = 0; i < totalPixels; i++) {
+        const idx = i * 4;
+        currGray[i] = (currData[idx] * 299 + currData[idx + 1] * 587 + currData[idx + 2] * 114) / 1000;
+      }
+
+      let camDx = 0;
+      let camDy = 0;
+      const blockVectors = []; // To store block displacements for overlay rendering
+
+      if (prevGrayscale) {
+        // --- STEP 1: Global Motion Estimation using Block Matching ---
+        // Define sample blocks on grid (7x5 = 35 sample regions)
+        const gridXCount = 7;
+        const gridYCount = 5;
+        const blockSize = 12; // 12x12 px block
+        const halfBlock = blockSize / 2;
+
+        const blockDxList = [];
+        const blockDyList = [];
+
+        const stepX = Math.floor((PROC_WIDTH - 2 * searchRange) / (gridXCount + 1));
+        const stepY = Math.floor((PROC_HEIGHT - 2 * searchRange) / (gridYCount + 1));
+
+        for (let gy = 1; gy <= gridYCount; gy++) {
+          const cy = searchRange + gy * stepY;
+          for (let gx = 1; gx <= gridXCount; gx++) {
+            const cx = searchRange + gx * stepX;
+
+            // Block Matching: Find (dx, dy) in [-searchRange, searchRange] that minimizes SAD
+            let minSAD = Infinity;
+            let bestDx = 0;
+            let bestDy = 0;
+
+            for (let dy = -searchRange; dy <= searchRange; dy += 2) {
+              for (let dx = -searchRange; dx <= searchRange; dx += 2) {
+                let sad = 0;
+
+                // Sum of Absolute Differences (SAD) over 12x12 block
+                for (let py = -halfBlock; py < halfBlock; py += 2) {
+                  const yCurr = cy + py;
+                  const yPrev = cy + py + dy;
+
+                  for (let px = -halfBlock; px < halfBlock; px += 2) {
+                    const xCurr = cx + px;
+                    const xPrev = cx + px + dx;
+
+                    const valCurr = currGray[yCurr * PROC_WIDTH + xCurr];
+                    const valPrev = prevGrayscale[yPrev * PROC_WIDTH + xPrev];
+
+                    sad += Math.abs(valCurr - valPrev);
+                  }
+                }
+
+                if (sad < minSAD) {
+                  minSAD = sad;
+                  bestDx = dx;
+                  bestDy = dy;
+                }
+              }
+            }
+
+            blockDxList.push(bestDx);
+            blockDyList.push(bestDy);
+            blockVectors.push({ cx, cy, dx: bestDx, dy: bestDy });
+          }
+        }
+
+        // --- STEP 2: MEDIAN FLOW FILTERING ---
+        // Median removes moving foreground objects (outliers) and extracts true background camera motion
+        camDx = Math.round(getMedian(blockDxList));
+        camDy = Math.round(getMedian(blockDyList));
+      }
+
+      // Update UI Camera Vector HUD
+      camVectorVal.textContent = `X: ${camDx > 0 ? '+' + camDx : camDx}, Y: ${camDy > 0 ? '+' + camDy : camDy}px`;
+      
+      // Clamp vector indicator dot for HUD radar
+      const dotX = Math.max(-10, Math.min(10, camDx * 1.5));
+      const dotY = Math.max(-10, Math.min(10, camDy * 1.5));
+      vectorDot.style.transform = `translate(${dotX}px, ${dotY}px)`;
+
+      // --- STEP 3: Camera Motion Compensation & Frame Differencing ---
+      const motionGrid = Array.from({ length: GRID_ROWS }, () => new Uint8Array(GRID_COLS));
+      let activePixelTotal = 0;
+
+      if (prevGrayscale) {
+        for (let y = 0; y < PROC_HEIGHT; y++) {
+          const rowCell = Math.floor(y / CELL_H);
+          
+          // Compensate Y coordinate of previous frame using background motion
+          const prevY = y + camDy;
+          const isValidY = (prevY >= 0 && prevY < PROC_HEIGHT);
+
+          for (let x = 0; x < PROC_WIDTH; x++) {
+            const colCell = Math.floor(x / CELL_W);
+            const idx = y * PROC_WIDTH + x;
+
+            // Compensate X coordinate
+            const prevX = x + camDx;
+            const isValidX = (prevX >= 0 && prevX < PROC_WIDTH);
+
+            let diff = 0;
+            if (isValidY && isValidX) {
+              const prevIdx = prevY * PROC_WIDTH + prevX;
+              diff = Math.abs(currGray[idx] - prevGrayscale[prevIdx]);
+            }
+
+            const pixelDataIdx = idx * 4;
+
+            if (diff > pixelThreshold) {
+              motionGrid[rowCell][colCell]++;
+              activePixelTotal++;
+
+              if (showDebug) {
+                // Highlight independent foreground motion in bright emerald green
+                currData[pixelDataIdx] = 16;
+                currData[pixelDataIdx + 1] = 240;
+                currData[pixelDataIdx + 2] = 130;
+              }
+            } else if (showDebug) {
+              // Dim background in debug mode
+              currData[pixelDataIdx] = Math.floor(currData[pixelDataIdx] * 0.25);
+              currData[pixelDataIdx + 1] = Math.floor(currData[pixelDataIdx + 1] * 0.25);
+              currData[pixelDataIdx + 2] = Math.floor(currData[pixelDataIdx + 2] * 0.25);
+            }
+          }
+        }
+      }
+
+      // Save current frame for next iteration
+      prevGrayscale = currGray;
+
+      if (showDebug) {
+        procCtx.putImageData(currFrame, 0, 0);
+      }
+
+      // --- STEP 4: Connected Component Clustering on Motion Grid ---
+      const visited = Array.from({ length: GRID_ROWS }, () => new Uint8Array(GRID_COLS));
+      const boundingBoxes = [];
+      const CELL_ACTIVE_MIN = 6; 
+
+      for (let r = 0; r < GRID_ROWS; r++) {
+        for (let c = 0; c < GRID_COLS; c++) {
+          if (!visited[r][c] && motionGrid[r][c] >= CELL_ACTIVE_MIN) {
+            const queue = [[r, c]];
+            visited[r][c] = 1;
+
+            let minR = r, maxR = r;
+            let minC = c, maxC = c;
+            let cellCount = 0;
+
+            while (queue.length > 0) {
+              const [currR, currC] = queue.shift();
+              cellCount++;
+
+              if (currR < minR) minR = currR;
+              if (currR > maxR) maxR = currR;
+              if (currC < minC) minC = currC;
+              if (currC > maxC) maxC = currC;
+
+              for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                  const nr = currR + dr;
+                  const nc = currC + dc;
+
+                  if (
+                    nr >= 0 && nr < GRID_ROWS &&
+                    nc >= 0 && nc < GRID_COLS &&
+                    !visited[nr][nc] &&
+                    motionGrid[nr][nc] >= CELL_ACTIVE_MIN
+                  ) {
+                    visited[nr][nc] = 1;
+                    queue.push([nr, nc]);
+                  }
+                }
+              }
+            }
+
+            if (cellCount >= minBlobCells) {
+              boundingBoxes.push({
+                x: (minC * CELL_W) / PROC_WIDTH,
+                y: (minR * CELL_H) / PROC_HEIGHT,
+                w: ((maxC - minC + 1) * CELL_W) / PROC_WIDTH,
+                h: ((maxR - minR + 1) * CELL_H) / PROC_HEIGHT,
+                size: cellCount
+              });
+            }
+          }
+        }
+      }
+
+      // --- STEP 5: Render Display Canvas ---
+      displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+
+      if (showDebug) {
+        displayCtx.drawImage(procCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
+      } else {
+        displayCtx.drawImage(video, 0, 0, displayCanvas.width, displayCanvas.height);
+      }
+
+      const scaleX = displayCanvas.width;
+      const scaleY = displayCanvas.height;
+
+      // Draw Camera Motion Overlay Vectors (if enabled)
+      if (showVectors && blockVectors.length > 0) {
+        displayCtx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+        displayCtx.fillStyle = '#38bdf8';
+        displayCtx.lineWidth = 1.5;
+
+        blockVectors.forEach(vec => {
+          const vx = (vec.cx / PROC_WIDTH) * scaleX;
+          const vy = (vec.cy / PROC_HEIGHT) * scaleY;
+          const endX = ((vec.cx + vec.dx) / PROC_WIDTH) * scaleX;
+          const endY = ((vec.cy + vec.dy) / PROC_HEIGHT) * scaleY;
+
+          displayCtx.beginPath();
+          displayCtx.arc(vx, vy, 2, 0, Math.PI * 2);
+          displayCtx.fill();
+
+          displayCtx.beginPath();
+          displayCtx.moveTo(vx, vy);
+          displayCtx.lineTo(endX, endY);
+          displayCtx.stroke();
+        });
+      }
+
+      // Draw Motion Bounding Boxes around independently moving objects
+      boxCountEl.textContent = boundingBoxes.length;
+
+      boundingBoxes.forEach((box) => {
+        const bx = box.x * scaleX;
+        const by = box.y * scaleY;
+        const bw = box.w * scaleX;
+        const bh = box.h * scaleY;
+
+        // Glow outer rectangle
+        displayCtx.strokeStyle = 'rgba(16, 185, 129, 0.35)';
+        displayCtx.lineWidth = 6;
+        displayCtx.strokeRect(bx, by, bw, bh);
+
+        // Main emerald rectangle
+        displayCtx.strokeStyle = '#10b981';
+        displayCtx.lineWidth = 2.5;
+        displayCtx.strokeRect(bx, by, bw, bh);
+
+        // Corner reticles
+        const cornerLen = Math.min(bw, bh, 14);
+        displayCtx.strokeStyle = '#34d399';
+        displayCtx.lineWidth = 3.5;
+
+        // Top-Left corner
+        displayCtx.beginPath();
+        displayCtx.moveTo(bx, by + cornerLen);
+        displayCtx.lineTo(bx, by);
+        displayCtx.lineTo(bx + cornerLen, by);
+        displayCtx.stroke();
+
+        // Bottom-Right corner
+        displayCtx.beginPath();
+        displayCtx.moveTo(bx + bw, by + bh - cornerLen);
+        displayCtx.lineTo(bx + bw, by + bh);
+        displayCtx.lineTo(bx + bw - cornerLen, by + bh);
+        displayCtx.stroke();
+
+        // Object Label Tag
+        displayCtx.fillStyle = '#10b981';
+        displayCtx.fillRect(bx, Math.max(0, by - 22), 115, 20);
+
+        displayCtx.fillStyle = '#022c22';
+        displayCtx.font = 'bold 10px Inter, sans-serif';
+        displayCtx.fillText('SAMOSTATNÝ POHYB', bx + 5, Math.max(14, by - 8));
+      });
+
+      // Calculate motion percentage
+      const motionPct = Math.min(100, Math.round((activePixelTotal / (PROC_WIDTH * PROC_HEIGHT)) * 100 * 6));
+      motionMeterVal.textContent = `${motionPct}%`;
+      motionBar.style.width = `${motionPct}%`;
+
+      if (motionPct > 50) {
+        motionBar.className = 'bg-rose-500 h-full transition-all duration-100';
+      } else if (motionPct > 20) {
+        motionBar.className = 'bg-amber-500 h-full transition-all duration-100';
+      } else {
+        motionBar.className = 'bg-emerald-500 h-full transition-all duration-100';
+      }
+
+      // Update Alerts & Status Badges
+      const hasIndependentMotion = boundingBoxes.length > 0;
+      if (hasIndependentMotion) {
+        updateStatusBadge(true, true);
+        motionFlash.style.borderColor = 'rgba(16, 185, 129, 0.5)';
+        triggerAudioBeep();
+      } else {
+        updateStatusBadge(true, false);
+        motionFlash.style.borderColor = 'rgba(16, 185, 129, 0)';
+      }
+
+      animationFrameId = requestAnimationFrame(processLoop);
+    }
+
+    function updateStatusBadge(active, motion) {
+      if (!active) {
+        statusBadge.className = 'px-3 py-1 rounded-full border text-xs font-semibold flex items-center gap-1.5 transition-all bg-slate-800 border-slate-700 text-slate-400';
+        statusDot.className = 'w-2 h-2 rounded-full bg-slate-500';
+        statusText.textContent = 'Kamera vypnuta';
+        return;
+      }
+
+      if (motion) {
+        statusBadge.className = 'px-3 py-1 rounded-full border text-xs font-semibold flex items-center gap-1.5 transition-all bg-emerald-500/20 border-emerald-500/50 text-emerald-400';
+        statusDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-ping';
+        statusText.textContent = 'Detekován Objekt!';
+      } else {
+        statusBadge.className = 'px-3 py-1 rounded-full border text-xs font-semibold flex items-center gap-1.5 transition-all bg-slate-800 border-slate-700 text-slate-300';
+        statusDot.className = 'w-2 h-2 rounded-full bg-emerald-500';
+        statusText.textContent = 'Stabilizace aktivní';
+      }
+    }
+
+    function updatePlayBtnUI(playing) {
+      if (playing) {
+        btnPlayText.textContent = 'Zastavit';
+        playIcon.classList.add('hidden');
+        stopIcon.classList.remove('hidden');
+        btnTogglePlay.className = 'col-span-2 bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white font-semibold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 text-xs transition active:scale-95 shadow';
+      } else {
+        btnPlayText.textContent = 'Spustit';
+        playIcon.classList.remove('hidden');
+        stopIcon.classList.add('hidden');
+        btnTogglePlay.className = 'col-span-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-slate-950 font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 text-xs transition active:scale-95 shadow';
+      }
+    }
+
+    function showError(title, message) {
+      errorTitle.textContent = title;
+      errorMessage.textContent = message;
+      errorModal.classList.remove('hidden');
+    }
+
+    // Button Event Listeners
+    btnStart.addEventListener('click', initCamera);
+
+    btnTogglePlay.addEventListener('click', () => {
+      if (isStreaming) {
+        stopCameraStream();
+      } else {
+        initCamera();
+      }
+    });
+
+    btnFlipCamera.addEventListener('click', () => {
+      currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment';
+      initCamera();
+    });
+
+    btnRetry.addEventListener('click', () => {
+      errorModal.classList.add('hidden');
+      initCamera();
+    });
+
+    btnSnapshot.addEventListener('click', () => {
+      if (!isStreaming) return;
+      const link = document.createElement('a');
+      link.download = `stabilizovana_detekce_${new Date().toISOString().slice(0,19).replace(/[:T]/g, '_')}.png`;
+      link.href = displayCanvas.toDataURL('image/png');
+      link.click();
+    });
+
+    // Control Slider Listeners
+    threshSlider.addEventListener('input', (e) => {
+      pixelThreshold = parseInt(e.target.value, 10);
+      threshVal.textContent = pixelThreshold;
+    });
+
+    searchRangeSlider.addEventListener('input', (e) => {
+      searchRange = parseInt(e.target.value, 10);
+      searchRangeVal.textContent = `±${searchRange} px`;
+    });
+
+    areaSlider.addEventListener('input', (e) => {
+      minBlobCells = parseInt(e.target.value, 10);
+      areaVal.textContent = `${minBlobCells} buňky`;
+    });
+
+    chkDebug.addEventListener('change', (e) => {
+      showDebug = e.target.checked;
+    });
+
+    chkVectors.addEventListener('change', (e) => {
+      showVectors = e.target.checked;
+    });
+
+    chkAudio.addEventListener('change', (e) => {
+      playAudioAlert = e.target.checked;
+      if (playAudioAlert && (!audioCtx || audioCtx.state === 'suspended')) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      if (isStreaming) {
+        resizeDisplayCanvas();
+      }
+    });
+  </script>
+</body>
+</html>
+```
