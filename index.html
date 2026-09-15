@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Pokročilá Detekce Pohybu (Filtrovaná)</title>
+  <title>Vektorová Detekce Samostatného Pohybu</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -73,7 +73,7 @@
 </head>
 <body>
 
-  <h1>Detekce Samostatného Pohybu</h1>
+  <h1>Detekce Samostatného Pohybu (Vektory)</h1>
   <div id="status" class="status">⏳ Načítám OpenCV z docs.opencv.org...</div>
 
   <div class="container">
@@ -84,11 +84,11 @@
   <div class="controls">
     <button id="startBtn" class="btn" disabled>Spustit Detekci</button>
     <div class="row">
-      <label for="sens">Citlivost detekce:</label>
-      <input type="range" id="sens" min="15" max="50" value="25">
+      <label for="sens">Prahová odchylka pohybu:</label>
+      <input type="range" id="sens" min="5" max="25" value="10">
     </div>
     <div class="row">
-      <label for="debug">Zobrazit body pozadí:</label>
+      <label for="debug">Zobrazit vektory bodů:</label>
       <input type="checkbox" id="debug" checked>
     </div>
   </div>
@@ -104,14 +104,13 @@
 
     let isRunning = false;
     let stream = null;
-    const frameHistory = []; 
+    let prevGray = null;
     const procW = 320;
     const procH = 240;
 
-    // Inicializace OpenCV
     window.Module = {
       onRuntimeInitialized: function() {
-        statusEl.innerText = "✅ OpenCV v pořádku načteno!";
+        statusEl.innerText = "✅ Vektorový engine OpenCV připraven!";
         statusEl.style.color = "#4ade80";
         startBtn.disabled = false;
       }
@@ -121,22 +120,19 @@
     script.src = "https://docs.opencv.org/4.x/opencv.js";
     script.async = true;
     script.onerror = () => {
-      statusEl.innerText = "❌ Chyba stahování OpenCV skriptu.";
+      statusEl.innerText = "❌ Chyba stahování OpenCV.";
       statusEl.style.color = "#f87171";
     };
     document.body.appendChild(script);
 
     startBtn.addEventListener('click', async () => {
-      if (!isRunning) {
-        await startCamera();
-      } else {
-        stopCamera();
-      }
+      if (!isRunning) await startCamera();
+      else stopCamera();
     });
 
     async function startCamera() {
       try {
-        statusEl.innerText = "🎥 Startuji kameru...";
+        statusEl.innerText = "🎥 Spouštím kameru...";
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false
@@ -150,7 +146,7 @@
         isRunning = true;
         startBtn.innerText = "Zastavit Detekci";
         startBtn.style.background = "#dc2626";
-        statusEl.innerText = "🟢 Detekce aktivní (s potlačením šumu hran)";
+        statusEl.innerText = "🟢 Detekce aktivní (Analýza reziduálních vektorů)";
 
         requestAnimationFrame(processLoop);
       } catch (err) {
@@ -162,20 +158,44 @@
     function stopCamera() {
       isRunning = false;
       if (stream) stream.getTracks().forEach(t => t.stop());
-      while(frameHistory.length > 0) {
-        let f = frameHistory.pop();
-        f.delete();
-      }
+      if (prevGray) { prevGray.delete(); prevGray = null; }
       startBtn.innerText = "Spustit Detekci";
       startBtn.style.background = "#0284c7";
       statusEl.innerText = "⚡ Připraveno";
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
+    // Pomocná funkce pro shlukování odchýlených bodů do objektů (DBSCAN-like clustering)
+    function clusterPoints(points, maxDist) {
+      let clusters = [];
+      let visited = new Array(points.length).fill(false);
+
+      for (let i = 0; i < points.length; i++) {
+        if (visited[i]) continue;
+        let cluster = [points[i]];
+        visited[i] = true;
+
+        for (let j = 0; j < cluster.length; j++) {
+          let pA = cluster[j];
+          for (let k = 0; k < points.length; k++) {
+            if (!visited[k]) {
+              let pB = points[k];
+              let dist = Math.hypot(pA.x - pB.x, pA.y - pB.y);
+              if (dist < maxDist) {
+                visited[k] = true;
+                cluster.push(pB);
+              }
+            }
+          }
+        }
+        clusters.push(cluster);
+      }
+      return clusters;
+    }
+
     function processLoop() {
       if (!isRunning) return;
 
-      // 1. Získání snímku z videa
       const procCanvas = document.createElement('canvas');
       procCanvas.width = procW;
       procCanvas.height = procH;
@@ -186,35 +206,20 @@
       let currGray = new cv.Mat();
       cv.cvtColor(src, currGray, cv.COLOR_RGBA2GRAY);
 
-      // 2. NOVINKA: Gaussovské rozostření pro eliminaci falešných hran nábytku
-      let currBlur = new cv.Mat();
-      cv.GaussianBlur(currGray, currBlur, new cv.Size(5, 5), 0, 0);
-
-      // Ukládáme rozostřené snímky do pufru
-      frameHistory.push(currBlur);
-      currGray.delete(); // Smazat ostrý snímek
-
-      if (frameHistory.length > 4) {
-        let oldMat = frameHistory.shift();
-        oldMat.delete();
-      }
-
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      if (frameHistory.length >= 3) {
-        let refBlur = frameHistory[0];
-
-        // Hledání bodů pozadí na rozostřeném snímku
+      if (prevGray) {
+        // 1. Najdeme hustou síť bodů po celé ploše
         let refPoints = new cv.Mat();
-        cv.goodFeaturesToTrack(refBlur, refPoints, 90, 0.01, 10);
+        cv.goodFeaturesToTrack(prevGray, refPoints, 140, 0.01, 8);
 
-        if (refPoints.rows >= 8) {
+        if (refPoints.rows >= 10) {
           let currPoints = new cv.Mat(), statusMat = new cv.Mat(), errMat = new cv.Mat();
           let winSize = new cv.Size(15, 15);
           let criteria = new cv.TermCriteria(cv.TermCriteria_COUNT + cv.TermCriteria_EPS, 10, 0.03);
 
-          let latestBlur = frameHistory[frameHistory.length - 1];
-          cv.calcOpticalFlowPyrLK(refBlur, latestBlur, refPoints, currPoints, statusMat, errMat, winSize, 2, criteria);
+          // 2. Sledování posunu bodů optickým tokem
+          cv.calcOpticalFlowPyrLK(prevGray, currGray, refPoints, currPoints, statusMat, errMat, winSize, 2, criteria);
 
           let p1 = [], p2 = [];
           for (let i = 0; i < statusMat.rows; i++) {
@@ -224,84 +229,93 @@
             }
           }
 
-          if (p1.length >= 8) {
+          if (p1.length >= 10) {
             let matP1 = cv.matFromArray(p1.length / 2, 1, cv.CV_32FC2, p1);
             let matP2 = cv.matFromArray(p2.length / 2, 1, cv.CV_32FC2, p2);
 
-            // Výpočet kompenzace pohybu kamery s přísnějším filtrem RANSAC (2.0)
-            let H = cv.findHomography(matP1, matP2, cv.RANSAC, 2.0);
+            // 3. Výpočet globálního pohybu pozadí / kamery
+            let H = cv.findHomography(matP1, matP2, cv.RANSAC, 3.0);
 
             if (!H.empty()) {
-              let warpedRef = new cv.Mat();
-              cv.warpPerspective(refBlur, warpedRef, H, new cv.Size(procW, procH));
-
-              // Rozdíl vyhlazených snímků
-              let diff = new cv.Mat();
-              cv.absdiff(latestBlur, warpedRef, diff);
-
-              let threshVal = parseInt(sensInput.value);
-              let thresh = new cv.Mat();
-              cv.threshold(diff, thresh, threshVal, 255, cv.THRESH_BINARY);
-
-              // 3. NOVINKA: Erodování (vymazání tenkých fiktivních čar z hran nábytku)
-              let M_erode = cv.Mat.ones(3, 3, cv.CV_8U);
-              let eroded = new cv.Mat();
-              cv.erode(thresh, eroded, M_erode);
-
-              // 4. NOVINKA: Dilatace (spojení reálného objektu do souvislého tvaru)
-              let M_dilate = cv.Mat.ones(7, 7, cv.CV_8U);
-              let dilated = new cv.Mat();
-              cv.dilate(eroded, dilated, M_dilate);
-
-              let contours = new cv.MatVector();
-              let hierarchy = new cv.Mat();
-              cv.findContours(dilated, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+              let h = H.data64F;
+              let movingPoints = [];
+              const threshold = parseFloat(sensInput.value); // Prahová odchylka v pixelech
 
               const scaleX = canvas.width / procW;
               const scaleY = canvas.height / procH;
 
-              for (let i = 0; i < contours.size(); ++i) {
-                let contour = contours.get(i);
-                let area = cv.contourArea(contour);
+              // 4. Porovnání očekávané pozice podle kamery vs skutečné pozice bodu
+              for (let i = 0; i < p1.length; i += 2) {
+                let x1 = p1[i], y1 = p1[i+1];
+                let x2 = p2[i], y2 = p2[i+1];
 
-                // 5. NOVINKA: Minimální plocha zvýšena z 40 na 250 px pro odfiltrování zbytků šumu
-                if (area > 250) {
-                  let rect = cv.boundingRect(contour);
-                  let aspect = rect.width / rect.height;
+                let denom = h[6] * x1 + h[7] * y1 + h[8];
+                if (Math.abs(denom) < 0.0001) continue;
 
-                  // Ignorujeme nereálné extrémě tenké nudle
-                  if (aspect > 0.1 && aspect < 10.0) {
-                    ctx.strokeStyle = "#00ff66";
-                    ctx.lineWidth = 3;
-                    ctx.strokeRect(rect.x * scaleX, rect.y * scaleY, rect.width * scaleX, rect.height * scaleY);
+                // Matematická predikce, kam měl bod dopadnout, pokud je součástí statického pozadí
+                let predX = (h[0] * x1 + h[1] * y1 + h[2]) / denom;
+                let predY = (h[3] * x1 + h[4] * y1 + h[5]) / denom;
 
-                    ctx.fillStyle = "#00ff66";
-                    ctx.font = "bold 14px sans-serif";
-                    ctx.fillText("Pohyb objektu", rect.x * scaleX, Math.max(16, rect.y * scaleY - 6));
+                // Reziduální odchylka (vektorový rozdíl)
+                let dist = Math.hypot(x2 - predX, y2 - predY);
+
+                if (dist > threshold) {
+                  // Tento bod se pohybuje samovolně mimo pohyb kamery!
+                  movingPoints.push({ x: x2, y: y2 });
+
+                  if (debugCheck.checked) {
+                    ctx.fillStyle = "#ff0055"; // Červený bod = samostatný pohyb
+                    ctx.beginPath();
+                    ctx.arc(x2 * scaleX, y2 * scaleY, 4, 0, 2 * Math.PI);
+                    ctx.fill();
                   }
-                }
-              }
-
-              if (debugCheck.checked) {
-                ctx.fillStyle = "#38bdf8";
-                for (let i = 0; i < p2.length; i += 2) {
+                } else if (debugCheck.checked) {
+                  ctx.fillStyle = "#38bdf8"; // Modrý bod = statické pozadí
                   ctx.beginPath();
-                  ctx.arc(p2[i] * scaleX, p2[i + 1] * scaleY, 3, 0, 2 * Math.PI);
+                  ctx.arc(x2 * scaleX, y2 * scaleY, 2, 0, 2 * Math.PI);
                   ctx.fill();
                 }
               }
 
-              warpedRef.delete(); diff.delete(); thresh.delete(); 
-              M_erode.delete(); eroded.delete(); M_dilate.delete(); dilated.delete(); 
-              contours.delete(); hierarchy.delete(); H.delete();
+              // 5. Shlukování odchýlených bodů do souvislých obdélníků
+              let clusters = clusterPoints(movingPoints, 45); // Max vzdálenost bodů v objektu
+
+              for (let c of clusters) {
+                if (c.length >= 3) { // Alespoň 3 odchýlené body tvoří platný objekt
+                  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                  for (let p of c) {
+                    if (p.x < minX) minX = p.x;
+                    if (p.x > maxX) maxX = p.x;
+                    if (p.y < minY) minY = p.y;
+                    if (p.y > maxY) maxY = p.y;
+                  }
+
+                  let rectX = (minX - 8) * scaleX;
+                  let rectY = (minY - 8) * scaleY;
+                  let rectW = (maxX - minX + 16) * scaleX;
+                  let rectH = (maxY - minY + 16) * scaleY;
+
+                  ctx.strokeStyle = "#00ff66";
+                  ctx.lineWidth = 3;
+                  ctx.strokeRect(rectX, rectY, rectW, rectH);
+
+                  ctx.fillStyle = "#00ff66";
+                  ctx.font = "bold 14px sans-serif";
+                  ctx.fillText("Samostatný pohyb", rectX, Math.max(16, rectY - 6));
+                }
+              }
+
+              H.delete();
             }
             matP1.delete(); matP2.delete();
           }
           currPoints.delete(); statusMat.delete(); errMat.delete();
         }
         refPoints.delete();
+        prevGray.delete();
       }
 
+      prevGray = currGray; // Uložení aktuálního snímku jako referenčního pro příští cyklus
       src.delete();
       requestAnimationFrame(processLoop);
     }
