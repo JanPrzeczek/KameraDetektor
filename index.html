@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Chytrá Vektorová Detekce Pohybu</title>
+  <title>Extrémně Citlivá Vektorová Detekce Pohybu</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -58,17 +58,16 @@
       border: 1px solid #334155;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
 
-    /* Tlačítka předvoleb */
-    .presets-title { font-size: 0.8rem; color: #94a3b8; font-weight: bold; text-transform: uppercase; }
+    .presets-title { font-size: 0.78rem; color: #94a3b8; font-weight: bold; text-transform: uppercase; }
     .presets-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
     .preset-btn {
       background: #334155;
       color: #f1f5f9;
       border: 1px solid #475569;
-      padding: 6px 4px;
+      padding: 8px 4px;
       border-radius: 6px;
       font-size: 0.75rem;
       cursor: pointer;
@@ -91,7 +90,6 @@
     }
     .main-btn:disabled { background: #475569; opacity: 0.6; cursor: not-allowed; }
 
-    /* Styly pro sekce nastavení s nápovědou */
     .setting-card {
       background: #0f172a;
       padding: 10px;
@@ -104,7 +102,6 @@
       align-items: center;
       font-size: 0.85rem;
       font-weight: 600;
-      margin-bottom: 4px;
     }
     .val-tag { color: #38bdf8; font-weight: bold; background: #1e293b; padding: 2px 6px; border-radius: 4px; }
     
@@ -120,16 +117,14 @@
       font-size: 0.72rem;
       color: #94a3b8;
       line-height: 1.25;
-      margin-top: 4px;
     }
     .help-dynamic {
       color: #38bdf8;
       font-weight: 500;
       display: block;
-      margin-top: 2px;
+      margin-top: 3px;
     }
 
-    /* Rozbalovací návod */
     details {
       background: #0f172a;
       padding: 8px 12px;
@@ -144,7 +139,7 @@
 </head>
 <body>
 
-  <h1>Chytrá Vektorová Detekce Pohybu</h1>
+  <h1>Extrémně Citlivá Detekce Pohybu</h1>
   <div id="status" class="status">⏳ Načítám OpenCV z docs.opencv.org...</div>
 
   <div class="container">
@@ -154,14 +149,13 @@
 
   <div class="controls">
     
-    <!-- Tlačítko start/stop -->
     <button id="startBtn" class="main-btn" disabled>Spustit Detekci</button>
 
     <!-- Rychlé předvolby -->
     <div>
-      <div class="presets-title">Rychlé předvolby režimu:</div>
+      <div class="presets-title">Rychlé předvolby scenářů:</div>
       <div class="presets-grid">
-        <button class="preset-btn" id="presetFar">🚗 Vzdálená auta</button>
+        <button class="preset-btn" id="presetFar">🏎️ Max. Dálka (Auta)</button>
         <button class="preset-btn" id="presetNear">✋ Blízký pohyb</button>
         <button class="preset-btn" id="presetEco">🔋 Úsporný režim</button>
       </div>
@@ -170,31 +164,31 @@
     <!-- 1. Rozlišení -->
     <div class="setting-card">
       <div class="setting-header">
-        <span>Rozlišení obrazového procesoru</span>
+        <span>Rozlišení obrazu (Detailnost)</span>
       </div>
       <div class="setting-input-row">
         <select id="resSelect">
-          <option value="320x240">320×240 (Rychlé - Úspora baterie)</option>
-          <option value="480x360" selected>480×360 (Vyvážené - Doporučeno)</option>
+          <option value="320x240">320×240 (Rychlé - Úspora CPU)</option>
+          <option value="480x360" selected>480×360 (Vyvážené)</option>
           <option value="640x480">640×480 (Jemné - Pro auta v dálce)</option>
         </select>
       </div>
       <div class="help-text">
-        <strong>Vliv:</strong> Vyšší rozlišení vidí drobné objekty v dálce, ale spotřebuje více výkonu.
+        <strong>Reakce:</strong> Okamžitá (vyčistí paměť). Vyšší rozlišení vidí mikroskopické posuny v dálce.
       </div>
     </div>
 
     <!-- 2. Časový odstup -->
     <div class="setting-card">
       <div class="setting-header">
-        <span>Časový odstup snímků</span>
-        <span id="strideVal" class="val-tag">4 sn.</span>
+        <span>Časový odstup snímků (Frame Stride)</span>
+        <span id="strideVal" class="val-tag">6 sn.</span>
       </div>
       <div class="setting-input-row">
-        <input type="range" id="strideInput" min="1" max="8" value="4">
+        <input type="range" id="strideInput" min="1" max="15" value="6">
       </div>
       <div class="help-text">
-        <strong>Doleva (1-2):</strong> Pro rychlý pohyb zblízka | <strong>Doprava (5-8):</strong> Pro velmi vzdálené/pomalé objekty.
+        <strong>Reakce:</strong> Postupná (během 0.1 až 0.5 s).
         <span id="strideHint" class="help-dynamic"></span>
       </div>
     </div>
@@ -202,14 +196,14 @@
     <!-- 3. Prahová odchylka -->
     <div class="setting-card">
       <div class="setting-header">
-        <span>Citlivost odchylky (Práh)</span>
-        <span id="sensVal" class="val-tag">7 px</span>
+        <span>Citlivost na posun (Prahová odchylka)</span>
+        <span id="sensVal" class="val-tag">2.5 px</span>
       </div>
       <div class="setting-input-row">
-        <input type="range" id="sensInput" min="3" max="20" value="7">
+        <input type="range" id="sensInput" min="1.0" max="15.0" step="0.5" value="2.5">
       </div>
       <div class="help-text">
-        <strong>Doleva (3-5):</strong> Vysoká citlivost (reaguje i na mírný posun) | <strong>Doprava (12-20):</strong> Odolnost vůči šumu.
+        <strong>Reakce:</strong> Okamžitá v příštím snímku.
         <span id="sensHint" class="help-dynamic"></span>
       </div>
     </div>
@@ -218,13 +212,13 @@
     <div class="setting-card">
       <div class="setting-header">
         <span>Hustota sledovací sítě</span>
-        <span id="pointsVal" class="val-tag">180 bodů</span>
+        <span id="pointsVal" class="val-tag">250 bodů</span>
       </div>
       <div class="setting-input-row">
-        <input type="range" id="pointsInput" min="80" max="350" step="10" value="180">
+        <input type="range" id="pointsInput" min="80" max="450" step="10" value="250">
       </div>
       <div class="help-text">
-        <strong>Doleva (80):</strong> Rychlé zpracování | <strong>Doprava (350):</strong> Husté pokrytí, nemine malé předměty v dálce.
+        <strong>Reakce:</strong> Okamžitá v příštím snímku. Čím více bodů, tím menší šance, že vzdálené auto uletí nepozorovaně.
       </div>
     </div>
 
@@ -232,31 +226,25 @@
     <div class="setting-card">
       <div class="setting-header">
         <span>Min. bodů pro potvrzení objektu</span>
-        <span id="minPtsVal" class="val-tag">2 body</span>
+        <span id="minPtsVal" class="val-tag">1 bod</span>
       </div>
       <div class="setting-input-row">
-        <input type="range" id="minPtsInput" min="1" max="5" value="2">
+        <input type="range" id="minPtsInput" min="1" max="5" value="1">
       </div>
       <div class="help-text">
-        <strong>Doleva (1):</strong> Zachytí i 1 malý bod v dálce | <strong>Doprava (4-5):</strong> Vyžaduje celý shluk bodů (vymaže falešné poplachy).
+        <strong>Reakce:</strong> Okamžitá v příštím snímku. Pro vzdálené objekty nastavte 1 nebo 2 body.
       </div>
     </div>
 
-    <!-- Debug režim -->
     <div class="setting-card" style="display: flex; justify-content: space-between; align-items: center;">
       <span style="font-size:0.85rem; font-weight:600;">Zobrazovat vektory pohybu</span>
       <input type="checkbox" id="debugCheck" checked style="width:20px; height:20px;">
     </div>
 
-    <!-- Návod -->
     <details>
-      <summary>❓ Jak detekce funguje a co znamenají barvy?</summary>
-      <p>Aplikace matematicky odčítá pohyb samotného telefonu, aby poznala, co se hýbe nezávisle na vás.</p>
-      <ul>
-        <li><strong style="color:#38bdf8;">🔵 Modré body:</strong> Statické pozadí (stěny, stromy, nábytek). Kamera počítá jejich náklon.</li>
-        <li><strong style="color:#ff0055;">🔴 Červené body:</strong> Objekty, které se pohybují jinak než kamera (např. auto, ruka).</li>
-        <li><strong style="color:#00ff66;">🟩 Zelený rámeček:</strong> Finální potvrzený objekt v pohybu.</li>
-      </ul>
+      <summary>❓ Jak se změny promítají do měření?</summary>
+      <p>Všechny posuvníky (citlivost, počet bodů, min. body) mění výpočet <strong>okamžitě bez zpoždění</strong> (v příštím snímku za 16 milisekund).</p>
+      <p>Při změně rozlišení se automaticky vymaže historie snímků, aby nedošlo k chybě matematické matice.</p>
     </details>
 
   </div>
@@ -268,7 +256,6 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
-    // Ovládací prvky
     const resSelect = document.getElementById('resSelect');
     const strideInput = document.getElementById('strideInput');
     const strideVal = document.getElementById('strideVal');
@@ -285,24 +272,22 @@
     const minPtsVal = document.getElementById('minPtsVal');
     const debugCheck = document.getElementById('debugCheck');
 
-    // Tlačítka předvoleb
     const presetFar = document.getElementById('presetFar');
     const presetNear = document.getElementById('presetNear');
     const presetEco = document.getElementById('presetEco');
 
-    // Reaktivní aktualizace nápověd a hodnot
     function updateUI() {
       const stride = parseInt(strideInput.value);
       strideVal.innerText = stride + " sn.";
-      if (stride <= 2) strideHint.innerText = "👉 Vhodné pro: Rychlé mávání rukou zblízka.";
-      else if (stride <= 4) strideHint.innerText = "👉 Vhodné pro: Běžný chodec nebo auta ve střední vzdálenosti.";
-      else strideHint.innerText = "👉 Vhodné pro: Velmi vzdálená auta nebo pomalý pohyb na horizontu.";
+      if (stride <= 2) strideHint.innerText = "👉 Pro rychlé pohyby zblízka (reakce za ~0.05s).";
+      else if (stride <= 6) strideHint.innerText = "👉 Vyvážené pro chůzi a běžný provoz.";
+      else strideHint.innerText = "👉 EXTRÉM PRO DÁLKU: Sleduje posun až za 0.5s (zachytí i auta na horizontu).";
 
-      const sens = parseInt(sensInput.value);
-      sensVal.innerText = sens + " px";
-      if (sens <= 5) sensHint.innerText = "👉 Vysoká citlivost: Může občas zachytit i šum kamery.";
-      else if (sens <= 10) sensHint.innerText = "👉 Vyvážená citlivost: Ideální poměr přesnosti.";
-      else sensHint.innerText = "👉 Nízká citlivost: Ignoruje drobné změny, reaguje jen na výrazný pohyb.";
+      const sens = parseFloat(sensInput.value);
+      sensVal.innerText = sens.toFixed(1) + " px";
+      if (sens <= 2.0) sensHint.innerText = "👉 EXTRÉMNÍ CITLIVOST: Zachytí neznatelný posun (1-2 px), pozor na šum!";
+      else if (sens <= 6.0) sensHint.innerText = "👉 Standardní citlivost: Stabilní detekce.";
+      else sensHint.innerText = "👉 Nízká citlivost: Ignoruje drobné změny v dálce.";
 
       pointsVal.innerText = pointsInput.value + " bodů";
       minPtsVal.innerText = minPtsInput.value + " " + (minPtsInput.value == 1 ? "bod" : "body");
@@ -313,31 +298,42 @@
     pointsInput.oninput = updateUI;
     minPtsInput.oninput = updateUI;
 
-    // Logika předvoleb
+    // Při změně rozlišení ihned vyčistíme zásobník snímků!
+    resSelect.onchange = () => {
+      updateResolution();
+      clearHistory();
+    };
+
     presetFar.onclick = () => {
       resSelect.value = "640x480";
-      strideInput.value = 5;
-      sensInput.value = 6;
-      pointsInput.value = 250;
+      strideInput.value = 8;
+      sensInput.value = 2.0;
+      pointsInput.value = 350;
       minPtsInput.value = 1;
+      updateResolution();
+      clearHistory();
       updateUI();
     };
 
     presetNear.onclick = () => {
       resSelect.value = "480x360";
       strideInput.value = 2;
-      sensInput.value = 8;
+      sensInput.value = 6.0;
       pointsInput.value = 150;
       minPtsInput.value = 3;
+      updateResolution();
+      clearHistory();
       updateUI();
     };
 
     presetEco.onclick = () => {
       resSelect.value = "320x240";
       strideInput.value = 3;
-      sensInput.value = 10;
+      sensInput.value = 8.0;
       pointsInput.value = 100;
       minPtsInput.value = 2;
+      updateResolution();
+      clearHistory();
       updateUI();
     };
 
@@ -346,7 +342,6 @@
     const frameHistory = []; 
     let procW = 480, procH = 360;
 
-    // Inicializace OpenCV
     window.Module = {
       onRuntimeInitialized: function() {
         statusEl.innerText = "✅ OpenCV engine načten a připraven!";
@@ -419,7 +414,6 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
-    // Shlukování bodů
     function clusterPoints(points, maxDist) {
       let clusters = [];
       let visited = new Array(points.length).fill(false);
@@ -450,7 +444,6 @@
     function processLoop() {
       if (!isRunning) return;
 
-      updateResolution();
       const stride = parseInt(strideInput.value);
       const maxCorners = parseInt(pointsInput.value);
       const threshold = parseFloat(sensInput.value);
@@ -479,7 +472,11 @@
         let refGray = frameHistory[0];
 
         let refPoints = new cv.Mat();
-        cv.goodFeaturesToTrack(refGray, refPoints, maxCorners, 0.008, 6);
+        
+        // KLÍČOVÁ ZMĚNA PRO DÁLKU:
+        // qualityLevel = 0.001 (extrémně citlivý na slabé rohy vzdálených aut)
+        // minDistance = 3 (velká hustota bodů vedle sebe)
+        cv.goodFeaturesToTrack(refGray, refPoints, maxCorners, 0.001, 3);
 
         if (refPoints.rows >= 8) {
           let currPoints = new cv.Mat(), statusMat = new cv.Mat(), errMat = new cv.Mat();
