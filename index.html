@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Vektorová Detekce Samostatného Pohybu</title>
+  <title>Chytrá Vektorová Detekce Pohybu</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -14,24 +14,26 @@
       flex-direction: column;
       align-items: center;
       min-height: 100vh;
-      padding: 12px;
+      padding: 10px;
     }
-    h1 { font-size: 1.2rem; margin-bottom: 6px; color: #38bdf8; text-align: center; }
+    h1 { font-size: 1.1rem; margin-bottom: 4px; color: #38bdf8; text-align: center; }
+    
     .status {
       background: #1e293b;
-      padding: 10px 14px;
-      border-radius: 12px;
-      font-size: 0.85rem;
-      margin-bottom: 12px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      margin-bottom: 10px;
       border: 1px solid #334155;
       text-align: center;
       width: 100%;
-      max-width: 480px;
+      max-width: 500px;
     }
+
     .container {
       position: relative;
       width: 100%;
-      max-width: 480px;
+      max-width: 500px;
       aspect-ratio: 4/3;
       background: #000;
       border-radius: 12px;
@@ -45,16 +47,38 @@
       object-fit: cover;
     }
     canvas { z-index: 10; }
+
     .controls {
       width: 100%;
-      max-width: 480px;
+      max-width: 500px;
       background: #1e293b;
-      margin-top: 12px;
-      padding: 14px;
+      margin-top: 10px;
+      padding: 12px;
       border-radius: 12px;
       border: 1px solid #334155;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
-    .btn {
+
+    /* Tlačítka předvoleb */
+    .presets-title { font-size: 0.8rem; color: #94a3b8; font-weight: bold; text-transform: uppercase; }
+    .presets-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+    .preset-btn {
+      background: #334155;
+      color: #f1f5f9;
+      border: 1px solid #475569;
+      padding: 6px 4px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      text-align: center;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .preset-btn:hover { background: #0284c7; border-color: #38bdf8; }
+
+    .main-btn {
       width: 100%;
       padding: 12px;
       background: #0284c7;
@@ -64,16 +88,63 @@
       font-weight: bold;
       font-size: 1rem;
       cursor: pointer;
-      margin-bottom: 10px;
     }
-    .btn:disabled { background: #475569; opacity: 0.6; cursor: not-allowed; }
-    .row { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.85rem; }
-    input[type=range] { width: 50%; }
+    .main-btn:disabled { background: #475569; opacity: 0.6; cursor: not-allowed; }
+
+    /* Styly pro sekce nastavení s nápovědou */
+    .setting-card {
+      background: #0f172a;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #1e293b;
+    }
+    .setting-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .val-tag { color: #38bdf8; font-weight: bold; background: #1e293b; padding: 2px 6px; border-radius: 4px; }
+    
+    .setting-input-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 6px 0;
+    }
+    .setting-input-row input, .setting-input-row select { flex: 1; }
+    
+    .help-text {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      line-height: 1.25;
+      margin-top: 4px;
+    }
+    .help-dynamic {
+      color: #38bdf8;
+      font-weight: 500;
+      display: block;
+      margin-top: 2px;
+    }
+
+    /* Rozbalovací návod */
+    details {
+      background: #0f172a;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      font-size: 0.8rem;
+    }
+    summary { font-weight: bold; color: #38bdf8; cursor: pointer; }
+    details p { margin-top: 6px; color: #cbd5e1; line-height: 1.35; }
+    details ul { margin-left: 18px; margin-top: 4px; color: #cbd5e1; }
   </style>
 </head>
 <body>
 
-  <h1>Detekce Samostatného Pohybu (Vektory)</h1>
+  <h1>Chytrá Vektorová Detekce Pohybu</h1>
   <div id="status" class="status">⏳ Načítám OpenCV z docs.opencv.org...</div>
 
   <div class="container">
@@ -82,15 +153,112 @@
   </div>
 
   <div class="controls">
-    <button id="startBtn" class="btn" disabled>Spustit Detekci</button>
-    <div class="row">
-      <label for="sens">Prahová odchylka pohybu:</label>
-      <input type="range" id="sens" min="5" max="25" value="10">
+    
+    <!-- Tlačítko start/stop -->
+    <button id="startBtn" class="main-btn" disabled>Spustit Detekci</button>
+
+    <!-- Rychlé předvolby -->
+    <div>
+      <div class="presets-title">Rychlé předvolby režimu:</div>
+      <div class="presets-grid">
+        <button class="preset-btn" id="presetFar">🚗 Vzdálená auta</button>
+        <button class="preset-btn" id="presetNear">✋ Blízký pohyb</button>
+        <button class="preset-btn" id="presetEco">🔋 Úsporný režim</button>
+      </div>
     </div>
-    <div class="row">
-      <label for="debug">Zobrazit vektory bodů:</label>
-      <input type="checkbox" id="debug" checked>
+
+    <!-- 1. Rozlišení -->
+    <div class="setting-card">
+      <div class="setting-header">
+        <span>Rozlišení obrazového procesoru</span>
+      </div>
+      <div class="setting-input-row">
+        <select id="resSelect">
+          <option value="320x240">320×240 (Rychlé - Úspora baterie)</option>
+          <option value="480x360" selected>480×360 (Vyvážené - Doporučeno)</option>
+          <option value="640x480">640×480 (Jemné - Pro auta v dálce)</option>
+        </select>
+      </div>
+      <div class="help-text">
+        <strong>Vliv:</strong> Vyšší rozlišení vidí drobné objekty v dálce, ale spotřebuje více výkonu.
+      </div>
     </div>
+
+    <!-- 2. Časový odstup -->
+    <div class="setting-card">
+      <div class="setting-header">
+        <span>Časový odstup snímků</span>
+        <span id="strideVal" class="val-tag">4 sn.</span>
+      </div>
+      <div class="setting-input-row">
+        <input type="range" id="strideInput" min="1" max="8" value="4">
+      </div>
+      <div class="help-text">
+        <strong>Doleva (1-2):</strong> Pro rychlý pohyb zblízka | <strong>Doprava (5-8):</strong> Pro velmi vzdálené/pomalé objekty.
+        <span id="strideHint" class="help-dynamic"></span>
+      </div>
+    </div>
+
+    <!-- 3. Prahová odchylka -->
+    <div class="setting-card">
+      <div class="setting-header">
+        <span>Citlivost odchylky (Práh)</span>
+        <span id="sensVal" class="val-tag">7 px</span>
+      </div>
+      <div class="setting-input-row">
+        <input type="range" id="sensInput" min="3" max="20" value="7">
+      </div>
+      <div class="help-text">
+        <strong>Doleva (3-5):</strong> Vysoká citlivost (reaguje i na mírný posun) | <strong>Doprava (12-20):</strong> Odolnost vůči šumu.
+        <span id="sensHint" class="help-dynamic"></span>
+      </div>
+    </div>
+
+    <!-- 4. Hustota bodů -->
+    <div class="setting-card">
+      <div class="setting-header">
+        <span>Hustota sledovací sítě</span>
+        <span id="pointsVal" class="val-tag">180 bodů</span>
+      </div>
+      <div class="setting-input-row">
+        <input type="range" id="pointsInput" min="80" max="350" step="10" value="180">
+      </div>
+      <div class="help-text">
+        <strong>Doleva (80):</strong> Rychlé zpracování | <strong>Doprava (350):</strong> Husté pokrytí, nemine malé předměty v dálce.
+      </div>
+    </div>
+
+    <!-- 5. Min. bodů pro objekt -->
+    <div class="setting-card">
+      <div class="setting-header">
+        <span>Min. bodů pro potvrzení objektu</span>
+        <span id="minPtsVal" class="val-tag">2 body</span>
+      </div>
+      <div class="setting-input-row">
+        <input type="range" id="minPtsInput" min="1" max="5" value="2">
+      </div>
+      <div class="help-text">
+        <strong>Doleva (1):</strong> Zachytí i 1 malý bod v dálce | <strong>Doprava (4-5):</strong> Vyžaduje celý shluk bodů (vymaže falešné poplachy).
+      </div>
+    </div>
+
+    <!-- Debug režim -->
+    <div class="setting-card" style="display: flex; justify-content: space-between; align-items: center;">
+      <span style="font-size:0.85rem; font-weight:600;">Zobrazovat vektory pohybu</span>
+      <input type="checkbox" id="debugCheck" checked style="width:20px; height:20px;">
+    </div>
+
+    <!-- Návod -->
+    <details>
+      <summary>❓ Jak detekce funguje a co znamenají barvy?</summary>
+      <p>Aplikace matematicky odčítá pohyb samotného telefonu, aby poznala, co se hýbe nezávisle na vás.</p>
+      <ul>
+        <li><strong style="color:#38bdf8;">🔵 Modré body:</strong> Statické pozadí (stěny, stromy, nábytek). Kamera počítá jejich náklon.</li>
+        <li><strong style="color:#ff0055;">🔴 Červené body:</strong> Objekty, které se pohybují jinak než kamera (např. auto, ruka).</li>
+        <li><strong style="color:#00ff66;">🟩 Zelený rámeček:</strong> Finální potvrzený objekt v pohybu.</li>
+      </ul>
+    </details>
+
   </div>
 
   <script>
@@ -99,20 +267,92 @@
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    const sensInput = document.getElementById('sens');
-    const debugCheck = document.getElementById('debug');
+
+    // Ovládací prvky
+    const resSelect = document.getElementById('resSelect');
+    const strideInput = document.getElementById('strideInput');
+    const strideVal = document.getElementById('strideVal');
+    const strideHint = document.getElementById('strideHint');
+    
+    const sensInput = document.getElementById('sensInput');
+    const sensVal = document.getElementById('sensVal');
+    const sensHint = document.getElementById('sensHint');
+    
+    const pointsInput = document.getElementById('pointsInput');
+    const pointsVal = document.getElementById('pointsVal');
+    
+    const minPtsInput = document.getElementById('minPtsInput');
+    const minPtsVal = document.getElementById('minPtsVal');
+    const debugCheck = document.getElementById('debugCheck');
+
+    // Tlačítka předvoleb
+    const presetFar = document.getElementById('presetFar');
+    const presetNear = document.getElementById('presetNear');
+    const presetEco = document.getElementById('presetEco');
+
+    // Reaktivní aktualizace nápověd a hodnot
+    function updateUI() {
+      const stride = parseInt(strideInput.value);
+      strideVal.innerText = stride + " sn.";
+      if (stride <= 2) strideHint.innerText = "👉 Vhodné pro: Rychlé mávání rukou zblízka.";
+      else if (stride <= 4) strideHint.innerText = "👉 Vhodné pro: Běžný chodec nebo auta ve střední vzdálenosti.";
+      else strideHint.innerText = "👉 Vhodné pro: Velmi vzdálená auta nebo pomalý pohyb na horizontu.";
+
+      const sens = parseInt(sensInput.value);
+      sensVal.innerText = sens + " px";
+      if (sens <= 5) sensHint.innerText = "👉 Vysoká citlivost: Může občas zachytit i šum kamery.";
+      else if (sens <= 10) sensHint.innerText = "👉 Vyvážená citlivost: Ideální poměr přesnosti.";
+      else sensHint.innerText = "👉 Nízká citlivost: Ignoruje drobné změny, reaguje jen na výrazný pohyb.";
+
+      pointsVal.innerText = pointsInput.value + " bodů";
+      minPtsVal.innerText = minPtsInput.value + " " + (minPtsInput.value == 1 ? "bod" : "body");
+    }
+
+    strideInput.oninput = updateUI;
+    sensInput.oninput = updateUI;
+    pointsInput.oninput = updateUI;
+    minPtsInput.oninput = updateUI;
+
+    // Logika předvoleb
+    presetFar.onclick = () => {
+      resSelect.value = "640x480";
+      strideInput.value = 5;
+      sensInput.value = 6;
+      pointsInput.value = 250;
+      minPtsInput.value = 1;
+      updateUI();
+    };
+
+    presetNear.onclick = () => {
+      resSelect.value = "480x360";
+      strideInput.value = 2;
+      sensInput.value = 8;
+      pointsInput.value = 150;
+      minPtsInput.value = 3;
+      updateUI();
+    };
+
+    presetEco.onclick = () => {
+      resSelect.value = "320x240";
+      strideInput.value = 3;
+      sensInput.value = 10;
+      pointsInput.value = 100;
+      minPtsInput.value = 2;
+      updateUI();
+    };
 
     let isRunning = false;
     let stream = null;
-    let prevGray = null;
-    const procW = 320;
-    const procH = 240;
+    const frameHistory = []; 
+    let procW = 480, procH = 360;
 
+    // Inicializace OpenCV
     window.Module = {
       onRuntimeInitialized: function() {
-        statusEl.innerText = "✅ Vektorový engine OpenCV připraven!";
+        statusEl.innerText = "✅ OpenCV engine načten a připraven!";
         statusEl.style.color = "#4ade80";
         startBtn.disabled = false;
+        updateUI();
       }
     };
 
@@ -120,7 +360,7 @@
     script.src = "https://docs.opencv.org/4.x/opencv.js";
     script.async = true;
     script.onerror = () => {
-      statusEl.innerText = "❌ Chyba stahování OpenCV.";
+      statusEl.innerText = "❌ Chyba načítání OpenCV skriptu.";
       statusEl.style.color = "#f87171";
     };
     document.body.appendChild(script);
@@ -130,11 +370,18 @@
       else stopCamera();
     });
 
+    function updateResolution() {
+      const parts = resSelect.value.split('x');
+      procW = parseInt(parts[0]);
+      procH = parseInt(parts[1]);
+    }
+
     async function startCamera() {
       try {
-        statusEl.innerText = "🎥 Spouštím kameru...";
+        updateResolution();
+        statusEl.innerText = "🎥 Načítám video z kamery...";
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false
         });
         video.srcObject = stream;
@@ -146,7 +393,7 @@
         isRunning = true;
         startBtn.innerText = "Zastavit Detekci";
         startBtn.style.background = "#dc2626";
-        statusEl.innerText = "🟢 Detekce aktivní (Analýza reziduálních vektorů)";
+        statusEl.innerText = "🟢 Detekce aktivní";
 
         requestAnimationFrame(processLoop);
       } catch (err) {
@@ -155,17 +402,24 @@
       }
     }
 
+    function clearHistory() {
+      while(frameHistory.length > 0) {
+        let f = frameHistory.pop();
+        f.delete();
+      }
+    }
+
     function stopCamera() {
       isRunning = false;
       if (stream) stream.getTracks().forEach(t => t.stop());
-      if (prevGray) { prevGray.delete(); prevGray = null; }
+      clearHistory();
       startBtn.innerText = "Spustit Detekci";
       startBtn.style.background = "#0284c7";
       statusEl.innerText = "⚡ Připraveno";
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
-    // Pomocná funkce pro shlukování odchýlených bodů do objektů (DBSCAN-like clustering)
+    // Shlukování bodů
     function clusterPoints(points, maxDist) {
       let clusters = [];
       let visited = new Array(points.length).fill(false);
@@ -196,6 +450,12 @@
     function processLoop() {
       if (!isRunning) return;
 
+      updateResolution();
+      const stride = parseInt(strideInput.value);
+      const maxCorners = parseInt(pointsInput.value);
+      const threshold = parseFloat(sensInput.value);
+      const minClusterPts = parseInt(minPtsInput.value);
+
       const procCanvas = document.createElement('canvas');
       procCanvas.width = procW;
       procCanvas.height = procH;
@@ -206,20 +466,28 @@
       let currGray = new cv.Mat();
       cv.cvtColor(src, currGray, cv.COLOR_RGBA2GRAY);
 
+      frameHistory.push(currGray);
+
+      if (frameHistory.length > stride + 1) {
+        let oldMat = frameHistory.shift();
+        oldMat.delete();
+      }
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      if (prevGray) {
-        // 1. Najdeme hustou síť bodů po celé ploše
-        let refPoints = new cv.Mat();
-        cv.goodFeaturesToTrack(prevGray, refPoints, 140, 0.01, 8);
+      if (frameHistory.length >= stride + 1) {
+        let refGray = frameHistory[0];
 
-        if (refPoints.rows >= 10) {
+        let refPoints = new cv.Mat();
+        cv.goodFeaturesToTrack(refGray, refPoints, maxCorners, 0.008, 6);
+
+        if (refPoints.rows >= 8) {
           let currPoints = new cv.Mat(), statusMat = new cv.Mat(), errMat = new cv.Mat();
           let winSize = new cv.Size(15, 15);
           let criteria = new cv.TermCriteria(cv.TermCriteria_COUNT + cv.TermCriteria_EPS, 10, 0.03);
 
-          // 2. Sledování posunu bodů optickým tokem
-          cv.calcOpticalFlowPyrLK(prevGray, currGray, refPoints, currPoints, statusMat, errMat, winSize, 2, criteria);
+          let latestGray = frameHistory[frameHistory.length - 1];
+          cv.calcOpticalFlowPyrLK(refGray, latestGray, refPoints, currPoints, statusMat, errMat, winSize, 2, criteria);
 
           let p1 = [], p2 = [];
           for (let i = 0; i < statusMat.rows; i++) {
@@ -229,22 +497,19 @@
             }
           }
 
-          if (p1.length >= 10) {
+          if (p1.length >= 8) {
             let matP1 = cv.matFromArray(p1.length / 2, 1, cv.CV_32FC2, p1);
             let matP2 = cv.matFromArray(p2.length / 2, 1, cv.CV_32FC2, p2);
 
-            // 3. Výpočet globálního pohybu pozadí / kamery
             let H = cv.findHomography(matP1, matP2, cv.RANSAC, 3.0);
 
             if (!H.empty()) {
               let h = H.data64F;
               let movingPoints = [];
-              const threshold = parseFloat(sensInput.value); // Prahová odchylka v pixelech
 
               const scaleX = canvas.width / procW;
               const scaleY = canvas.height / procH;
 
-              // 4. Porovnání očekávané pozice podle kamery vs skutečné pozice bodu
               for (let i = 0; i < p1.length; i += 2) {
                 let x1 = p1[i], y1 = p1[i+1];
                 let x2 = p2[i], y2 = p2[i+1];
@@ -252,36 +517,32 @@
                 let denom = h[6] * x1 + h[7] * y1 + h[8];
                 if (Math.abs(denom) < 0.0001) continue;
 
-                // Matematická predikce, kam měl bod dopadnout, pokud je součástí statického pozadí
                 let predX = (h[0] * x1 + h[1] * y1 + h[2]) / denom;
                 let predY = (h[3] * x1 + h[4] * y1 + h[5]) / denom;
 
-                // Reziduální odchylka (vektorový rozdíl)
                 let dist = Math.hypot(x2 - predX, y2 - predY);
 
                 if (dist > threshold) {
-                  // Tento bod se pohybuje samovolně mimo pohyb kamery!
                   movingPoints.push({ x: x2, y: y2 });
 
                   if (debugCheck.checked) {
-                    ctx.fillStyle = "#ff0055"; // Červený bod = samostatný pohyb
+                    ctx.fillStyle = "#ff0055";
                     ctx.beginPath();
                     ctx.arc(x2 * scaleX, y2 * scaleY, 4, 0, 2 * Math.PI);
                     ctx.fill();
                   }
                 } else if (debugCheck.checked) {
-                  ctx.fillStyle = "#38bdf8"; // Modrý bod = statické pozadí
+                  ctx.fillStyle = "#38bdf8";
                   ctx.beginPath();
                   ctx.arc(x2 * scaleX, y2 * scaleY, 2, 0, 2 * Math.PI);
                   ctx.fill();
                 }
               }
 
-              // 5. Shlukování odchýlených bodů do souvislých obdélníků
-              let clusters = clusterPoints(movingPoints, 45); // Max vzdálenost bodů v objektu
+              let clusters = clusterPoints(movingPoints, 40);
 
               for (let c of clusters) {
-                if (c.length >= 3) { // Alespoň 3 odchýlené body tvoří platný objekt
+                if (c.length >= minClusterPts) {
                   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
                   for (let p of c) {
                     if (p.x < minX) minX = p.x;
@@ -290,18 +551,18 @@
                     if (p.y > maxY) maxY = p.y;
                   }
 
-                  let rectX = (minX - 8) * scaleX;
-                  let rectY = (minY - 8) * scaleY;
-                  let rectW = (maxX - minX + 16) * scaleX;
-                  let rectH = (maxY - minY + 16) * scaleY;
+                  let rectX = (minX - 10) * scaleX;
+                  let rectY = (minY - 10) * scaleY;
+                  let rectW = Math.max(20 * scaleX, (maxX - minX + 20) * scaleX);
+                  let rectH = Math.max(20 * scaleY, (maxY - minY + 20) * scaleY);
 
                   ctx.strokeStyle = "#00ff66";
                   ctx.lineWidth = 3;
                   ctx.strokeRect(rectX, rectY, rectW, rectH);
 
                   ctx.fillStyle = "#00ff66";
-                  ctx.font = "bold 14px sans-serif";
-                  ctx.fillText("Samostatný pohyb", rectX, Math.max(16, rectY - 6));
+                  ctx.font = "bold 13px sans-serif";
+                  ctx.fillText("Objekt v pohybu", rectX, Math.max(14, rectY - 5));
                 }
               }
 
@@ -312,10 +573,8 @@
           currPoints.delete(); statusMat.delete(); errMat.delete();
         }
         refPoints.delete();
-        prevGray.delete();
       }
 
-      prevGray = currGray; // Uložení aktuálního snímku jako referenčního pro příští cyklus
       src.delete();
       requestAnimationFrame(processLoop);
     }
