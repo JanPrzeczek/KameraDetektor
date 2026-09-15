@@ -3,9 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Detektor Samostatného Pohybu (OpenCV)</title>
+  <title>Detektor Samostatného Pohybu (OpenCV.org)</title>
   <style>
+    /* Základní reset okrajů a nastavení box-sizingu */
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    /* Vzhled hlavní stránky - tmavý režim šetrný k baterii mobilu */
     body {
       background-color: #0f172a;
       color: #f8fafc;
@@ -16,7 +19,10 @@
       min-height: 100vh;
       padding: 12px;
     }
+    
     h1 { font-size: 1.2rem; margin-bottom: 6px; color: #38bdf8; text-align: center; }
+    
+    /* Informační panel o stavu načítání a detekce */
     .status {
       background: #1e293b;
       padding: 10px 14px;
@@ -28,6 +34,8 @@
       width: 100%;
       max-width: 480px;
     }
+    
+    /* Hlavní kontejner pro překrývání videa a detekční vrstvy */
     .container {
       position: relative;
       width: 100%;
@@ -38,13 +46,17 @@
       overflow: hidden;
       box-shadow: 0 10px 25px rgba(0,0,0,0.5);
     }
+    
+    /* Živý obraz z kamery a kreslicí plátno (canvas) přesně přes sebe */
     video, canvas {
       position: absolute;
       top: 0; left: 0;
       width: 100%; height: 100%;
       object-fit: cover;
     }
-    canvas { z-index: 10; }
+    canvas { z-index: 10; } /* Canvas je nahoře, aby vykresloval obdélníky přes video */
+    
+    /* Ovládací prvky pod videem */
     .controls {
       width: 100%;
       max-width: 480px;
@@ -54,6 +66,7 @@
       border-radius: 12px;
       border: 1px solid #334155;
     }
+    
     .btn {
       width: 100%;
       padding: 12px;
@@ -73,19 +86,22 @@
 </head>
 <body>
 
-  <h1>Detekce Pohybu s Kompenzací Rotace</h1>
-  <div id="status" class="status">⏳ Inicializuji OpenCV engine...</div>
+  <h1>Detekce Samostatného Pohybu</h1>
+  <!-- Stavové okno pro uživatele -->
+  <div id="status" class="status">⏳ Inicializuji OpenCV engine z docs.opencv.org...</div>
 
+  <!-- Zobrazovací oblast -->
   <div class="container">
     <video id="video" playsinline muted autoplay></video>
     <canvas id="canvas"></canvas>
   </div>
 
+  <!-- Ovládací panely -->
   <div class="controls">
     <button id="startBtn" class="btn" disabled>Spustit Detekci</button>
     <div class="row">
       <label for="sens">Citlivost detekce:</label>
-      <input type="range" id="sens" min="15" max="60" value="30">
+      <input type="range" id="sens" min="10" max="50" value="25">
     </div>
     <div class="row">
       <label for="debug">Zobrazit body pozadí:</label>
@@ -94,6 +110,7 @@
   </div>
 
   <script>
+    // --- 1. GLOBÁLNÍ PROMĚNNÉ A PRVKY DOM ---
     const statusEl = document.getElementById('status');
     const startBtn = document.getElementById('startBtn');
     const video = document.getElementById('video');
@@ -104,30 +121,38 @@
 
     let isRunning = false;
     let stream = null;
-    let prevGray = null;
-    let prevPoints = null;
+    
+    // Časový pufr pro uložení předchozích snímků (řeší rychlost snímkové frekvence)
+    const frameHistory = []; 
+    
+    // Rozlišení, na které snímky zmenšujeme pro rychlý výpočet na mobilním procesoru
     const procW = 320;
     const procH = 240;
 
-    // Příprava WebAssembly modulu před načtením skriptu
+    // --- 2. NAČTENÍ A INICIALIZACE KNÍHOVNY OPENCV.JS ---
+    
+    // Globální objekt Module, který si knihovna OpenCV volá po dokončení načtení WebAssembly
     window.Module = {
       onRuntimeInitialized: function() {
-        statusEl.innerText = "✅ OpenCV (WASM) připraveno!";
+        statusEl.innerText = "✅ OpenCV (docs.opencv.org) úspěšně načteno!";
         statusEl.style.color = "#4ade80";
-        startBtn.disabled = false;
+        startBtn.disabled = false; // Povolíme tlačítko pro spuštění
       }
     };
 
-    // Přímé načtení oficiální sestavené knihovny OpenCV
+    // Dynamické vložení skriptu přímo z oficiální dokumentace docs.opencv.org/4.x/
     const script = document.createElement('script');
     script.src = "https://docs.opencv.org/4.x/opencv.js";
     script.async = true;
+    
+    // Ošetření chyby při načítání (např. při výpadku sítě)
     script.onerror = () => {
-      statusEl.innerText = "❌ Síť zablokovala stahování OpenCV. Vypněte Blokování reklam / VPN v telefonu a obnovte stránku.";
+      statusEl.innerText = "❌ Chyba při stahování OpenCV z docs.opencv.org. Zkontrolujte připojení.";
       statusEl.style.color = "#f87171";
     };
     document.body.appendChild(script);
 
+    // --- 3. SPÁROVÁNÍ TLAČÍTKA A OVLÁDÁNÍ KAMERY ---
     startBtn.addEventListener('click', async () => {
       if (!isRunning) {
         await startCamera();
@@ -136,161 +161,186 @@
       }
     });
 
+    // KROK A: Spuštění mobilní kamery
     async function startCamera() {
       try {
-        statusEl.innerText = "🎥 Spouštím kameru...";
+        statusEl.innerText = "🎥 Spouštím zadní kameru...";
+        
+        // Vyžádání přístupu k zadnímu fotoaparátu (facingMode: 'environment')
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false
         });
+        
         video.srcObject = stream;
         await video.play();
 
+        // Přizpůsobení velikosti vykreslovacího plátna podle reálného videa z kamery
         canvas.width = video.videoWidth || 640;
         canvas.height = video.videoHeight || 480;
 
         isRunning = true;
         startBtn.innerText = "Zastavit Detekci";
         startBtn.style.background = "#dc2626";
-        statusEl.innerText = "🟢 Kompenzace rotace a pohybu aktivní";
+        statusEl.innerText = "🟢 Detekce aktivní (Kompenzuji pohyb kamery)";
 
+        // Zahájení hlavní výpočetní smyčky
         requestAnimationFrame(processLoop);
       } catch (err) {
-        statusEl.innerText = "❌ Chyba kamery: " + err.message;
+        statusEl.innerText = "❌ Chyba přístupu ke kameře: " + err.message;
         statusEl.style.color = "#f87171";
       }
     }
 
+    // KROK B: Zastavení kamery a vyčištění paměti
     function stopCamera() {
       isRunning = false;
       if (stream) {
+        // Vypnutí senzoru kamery
         stream.getTracks().forEach(t => t.stop());
       }
-      if (prevGray) { prevGray.delete(); prevGray = null; }
-      if (prevPoints) { prevPoints.delete(); prevPoints = null; }
+      
+      // Vyčištění uložených OpenCV matic z pufru
+      while(frameHistory.length > 0) {
+        let f = frameHistory.pop();
+        f.delete(); // Důležité uvolnění paměti C++ v prostředí JS
+      }
+      
       startBtn.innerText = "Spustit Detekci";
       startBtn.style.background = "#0284c7";
       statusEl.innerText = "⚡ Připraveno";
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
+    // --- 4. HLAVNÍ ALGORITMUS PRO ZPRACOVÁNÍ OBRAZU A DETEKCI POHYBU ---
     function processLoop() {
       if (!isRunning) return;
 
+      // 1. KROK: Získání snímku z videa a zmenšení na 320x240 pro plynulost
       const procCanvas = document.createElement('canvas');
       procCanvas.width = procW;
       procCanvas.height = procH;
       const procCtx = procCanvas.getContext('2d');
       procCtx.drawImage(video, 0, 0, procW, procH);
 
+      // 2. KROK: Načtení do OpenCV a převod do stupňů šedi (Grayscale)
       let src = cv.imread(procCanvas);
       let currGray = new cv.Mat();
       cv.cvtColor(src, currGray, cv.COLOR_RGBA2GRAY);
 
+      // 3. KROK: Uložení do historie snímků (Časový pufr pro překonání vysokého FPS kamery)
+      frameHistory.push(currGray);
+
+      // Udržujeme historii max 4 snímky zpět (~100 milisekund)
+      if (frameHistory.length > 4) {
+        let oldMat = frameHistory.shift();
+        oldMat.delete(); // Uvolnění paměti starého snímku
+      }
+
+      // Vyčištění plátna z předchozího snímku
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      if (!prevGray) {
-        prevGray = currGray.clone();
-        prevPoints = new cv.Mat();
-        cv.goodFeaturesToTrack(prevGray, prevPoints, 70, 0.01, 10);
-        src.delete(); currGray.delete();
-        requestAnimationFrame(processLoop);
-        return;
-      }
+      // 4. KROK: Pokud máme dostatek snímků pro porovnání (~100 ms odstup)
+      if (frameHistory.length >= 3) {
+        let refGray = frameHistory[0]; // Snímek před cca 100 ms
 
-      let currPoints = new cv.Mat();
-      let statusMat = new cv.Mat();
-      let errMat = new cv.Mat();
-      let winSize = new cv.Size(15, 15);
-      let criteria = new cv.TermCriteria(cv.TermCriteria_COUNT + cv.TermCriteria_EPS, 10, 0.03);
+        // A) Detekce významných bodů na pozadí (rohy, hranice objektů)
+        let refPoints = new cv.Mat();
+        cv.goodFeaturesToTrack(refGray, refPoints, 80, 0.01, 10);
 
-      if (prevPoints.rows > 8) {
-        cv.calcOpticalFlowPyrLK(prevGray, currGray, prevPoints, currPoints, statusMat, errMat, winSize, 2, criteria);
+        if (refPoints.rows >= 8) {
+          let currPoints = new cv.Mat();
+          let statusMat = new cv.Mat();
+          let errMat = new cv.Mat();
+          let winSize = new cv.Size(15, 15);
+          let criteria = new cv.TermCriteria(cv.TermCriteria_COUNT + cv.TermCriteria_EPS, 10, 0.03);
 
-        let p1 = [], p2 = [];
-        for (let i = 0; i < statusMat.rows; i++) {
-          if (statusMat.data[i] === 1) {
-            p1.push(prevPoints.data32F[i * 2], prevPoints.data32F[i * 2 + 1]);
-            p2.push(currPoints.data32F[i * 2], currPoints.data32F[i * 2 + 1]);
+          // B) Optický tok (Lucas-Kanade) - Sledování, kam se tyto body posunuly na novém snímku
+          cv.calcOpticalFlowPyrLK(refGray, currGray, refPoints, currPoints, statusMat, errMat, winSize, 2, criteria);
+
+          let p1 = [], p2 = [];
+          for (let i = 0; i < statusMat.rows; i++) {
+            if (statusMat.data[i] === 1) { // Pokud se bod podařilo úspěšně zachytit a usledovat
+              p1.push(refPoints.data32F[i * 2], refPoints.data32F[i * 2 + 1]);
+              p2.push(currPoints.data32F[i * 2], currPoints.data32F[i * 2 + 1]);
+            }
           }
-        }
 
-        if (p1.length >= 8) {
-          let matP1 = cv.matFromArray(p1.length / 2, 1, cv.CV_32FC2, p1);
-          let matP2 = cv.matFromArray(p2.length / 2, 1, cv.CV_32FC2, p2);
+          if (p1.length >= 8) {
+            let matP1 = cv.matFromArray(p1.length / 2, 1, cv.CV_32FC2, p1);
+            let matP2 = cv.matFromArray(p2.length / 2, 1, cv.CV_32FC2, p2);
 
-          // RANSAC Homografie: Odfiltruje pohyb samotného telefonu včetně rotace a náklonu
-          let H = cv.findHomography(matP1, matP2, cv.RANSAC, 3.0);
+            // C) RANSAC Homografie - Výpočet matice, která matematicky popisuje rotaci a náklon telefonu
+            // Algoritmus RANSAC ignoruje body z pohybujících se objektů a spočítá čistý pohyb pozadí
+            let H = cv.findHomography(matP1, matP2, cv.RANSAC, 3.0);
 
-          if (!H.empty()) {
-            let warpedPrev = new cv.Mat();
-            cv.warpPerspective(prevGray, warpedPrev, H, new cv.Size(procW, procH));
+            if (!H.empty()) {
+              // D) Perspektivní deformace - Virtuálně pootočíme starý snímek tak, aby 100% splynul s novým pozadím
+              let warpedRef = new cv.Mat();
+              cv.warpPerspective(refGray, warpedRef, H, new cv.Size(procW, procH));
 
-            let diff = new cv.Mat();
-            cv.absdiff(currGray, warpedPrev, diff);
+              // E) Absolutní rozdíl - Odečteme srovnané pozadí. Výsledkem jsou POUZE pixely nezávislého pohybu!
+              let diff = new cv.Mat();
+              cv.absdiff(currGray, warpedRef, diff);
 
-            let threshVal = parseInt(sensInput.value);
-            let thresh = new cv.Mat();
-            cv.threshold(diff, thresh, threshVal, 255, cv.THRESH_BINARY);
+              // F) Prahování (Thresholding) - Převedeme obraz na černobílý (0 = klid, 255 = pohyb)
+              let threshVal = parseInt(sensInput.value);
+              let thresh = new cv.Mat();
+              cv.threshold(diff, thresh, threshVal, 255, cv.THRESH_BINARY);
 
-            let M = cv.Mat.ones(3, 3, cv.CV_8U);
-            let dilated = new cv.Mat();
-            cv.dilate(thresh, dilated, M);
+              // G) Dilatace - Spojí izolované pixely pohybu do souvislých ploch
+              let M = cv.Mat.ones(7, 7, cv.CV_8U);
+              let dilated = new cv.Mat();
+              cv.dilate(thresh, dilated, M);
 
-            let contours = new cv.MatVector();
-            let hierarchy = new cv.Mat();
-            cv.findContours(dilated, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+              // H) Hledání kontur (Obrysů samostatně se pohybujících objektů)
+              let contours = new cv.MatVector();
+              let hierarchy = new cv.Mat();
+              cv.findContours(dilated, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-            const scaleX = canvas.width / procW;
-            const scaleY = canvas.height / procH;
+              const scaleX = canvas.width / procW;
+              const scaleY = canvas.height / procH;
 
-            for (let i = 0; i < contours.size(); ++i) {
-              let contour = contours.get(i);
-              if (cv.contourArea(contour) > 100) {
-                let rect = cv.boundingRect(contour);
-                ctx.strokeStyle = "#00ff66";
-                ctx.lineWidth = 3;
-                ctx.strokeRect(rect.x * scaleX, rect.y * scaleY, rect.width * scaleX, rect.height * scaleY);
+              // I) Vykreslení zelených obdélníků kolem detekovaných objektů
+              for (let i = 0; i < contours.size(); ++i) {
+                let contour = contours.get(i);
+                if (cv.contourArea(contour) > 40) { // Ignorujeme drobný šum
+                  let rect = cv.boundingRect(contour);
+                  
+                  ctx.strokeStyle = "#00ff66";
+                  ctx.lineWidth = 3;
+                  ctx.strokeRect(rect.x * scaleX, rect.y * scaleY, rect.width * scaleX, rect.height * scaleY);
 
-                ctx.fillStyle = "#00ff66";
-                ctx.font = "bold 14px sans-serif";
-                ctx.fillText("Samostatný pohyb", rect.x * scaleX, Math.max(16, rect.y * scaleY - 6));
+                  ctx.fillStyle = "#00ff66";
+                  ctx.font = "bold 14px sans-serif";
+                  ctx.fillText("Objekt v pohybu", rect.x * scaleX, Math.max(16, rect.y * scaleY - 6));
+                }
               }
-            }
 
-            warpedPrev.delete(); diff.delete(); thresh.delete(); M.delete(); dilated.delete(); contours.delete(); hierarchy.delete(); H.delete();
-          }
-          matP1.delete(); matP2.delete();
-        }
+              // J) Vykreslení modrých bodů pozadí (Pokud je zapnutý Debug režim)
+              if (debugCheck.checked) {
+                ctx.fillStyle = "#38bdf8";
+                for (let i = 0; i < p2.length; i += 2) {
+                  ctx.beginPath();
+                  ctx.arc(p2[i] * scaleX, p2[i + 1] * scaleY, 3, 0, 2 * Math.PI);
+                  ctx.fill();
+                }
+              }
 
-        if (debugCheck.checked) {
-          const scaleX = canvas.width / procW;
-          const scaleY = canvas.height / procH;
-          ctx.fillStyle = "#38bdf8";
-          for (let i = 0; i < currPoints.rows; i++) {
-            if (statusMat.data[i] === 1) {
-              ctx.beginPath();
-              ctx.arc(currPoints.data32F[i * 2] * scaleX, currPoints.data32F[i * 2 + 1] * scaleY, 3, 0, 2 * Math.PI);
-              ctx.fill();
+              // Uvolnění paměti z dočasných matic
+              warpedRef.delete(); diff.delete(); thresh.delete(); M.delete(); dilated.delete(); contours.delete(); hierarchy.delete(); H.delete();
             }
+            matP1.delete(); matP2.delete();
           }
+          currPoints.delete(); statusMat.delete(); errMat.delete();
         }
+        refPoints.delete();
       }
 
-      prevGray.delete();
-      prevGray = currGray.clone();
-
-      if (prevPoints.rows < 20) {
-        prevPoints.delete();
-        prevPoints = new cv.Mat();
-        cv.goodFeaturesToTrack(prevGray, prevPoints, 70, 0.01, 10);
-      } else {
-        prevPoints.delete();
-        prevPoints = currPoints.clone();
-      }
-
-      src.delete(); currGray.delete(); currPoints.delete(); statusMat.delete(); errMat.delete();
-
+      // Uvolnění matice zdrojového snímku
+      src.delete();
+      
+      // Plánování dalšího snímku
       requestAnimationFrame(processLoop);
     }
   </script>
